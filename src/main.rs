@@ -3,37 +3,38 @@ mod logging;
 use backend::{Backend, BackendMsg, FrontendMsg};
 
 use anyhow::{Context, Result};
+use futures::SinkExt;
 use iced::widget::{button, center, checkbox, column, row, text};
 use iced::{Element, Font, Task};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+// use std::sync::mpsc::{self, Receiver, Sender};
+// use tokio::sync::mpsc;
+use futures::channel::mpsc;
+// use std::sync::{Arc, Mutex};
 use std::thread;
-
-const ICON_FONT: Font = Font::with_name("icons");
+// use tracing::instrument::WithSubscriber;
 
 pub fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::builder()
-                .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
-                .from_env_lossy(),
-        )
-        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
-        .init();
     logging::init_logging()?;
+    log::info!("Starting the application...");
 
     // Create channels for communication
-    let (backend_tx, backend_rx) = mpsc::channel();
-    let (frontend_tx, frontend_rx) = mpsc::channel();
+    let (backend_tx, backend_rx) = mpsc::channel(16);
+    let (frontend_tx, frontend_rx) = mpsc::channel(16);
 
     // Launch backend in a separate thread
-    let backend_handle = thread::spawn(move || {
-        let mut backend = Backend::new(backend_rx, frontend_tx);
-        backend.run();
+    let _backend_handle = thread::spawn(move || {
+        // Create a new Tokio runtime for this thread
+        let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+
+        // Run the backend within the Tokio runtime
+        runtime.block_on(async {
+            let mut backend = Backend::new(backend_rx, frontend_tx);
+            backend.run().await;
+        });
     });
 
     iced::application("Checkbox - Iced", Example::update, Example::view)
-        .font(include_bytes!("../assets/icons.ttf").as_slice())
+        .subscription(Example::subscription)
         .run_with(|| (Example::new(backend_tx, frontend_rx), Task::none()))
         .context("Failed to run the application")
 }
@@ -45,8 +46,8 @@ struct Example {
     custom: bool,
 
     // Add channels for communication
-    backend_tx: Option<Sender<BackendMsg>>,
-    frontend_rx: Option<Receiver<FrontendMsg>>,
+    backend_tx: Option<mpsc::Sender<BackendMsg>>,
+    frontend_rx: Option<mpsc::Receiver<FrontendMsg>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -55,7 +56,7 @@ enum Message {
 }
 
 impl Example {
-    fn new(backend_tx: Sender<BackendMsg>, frontend_rx: Receiver<FrontendMsg>) -> Self {
+    fn new(backend_tx: mpsc::Sender<BackendMsg>, frontend_rx: mpsc::Receiver<FrontendMsg>) -> Self {
         Self {
             backend_tx: Some(backend_tx),
             frontend_rx: Some(frontend_rx),
@@ -67,12 +68,18 @@ impl Example {
         match message {
             Message::ButtonPressed => {
                 log::debug!("Button pressed!");
-                println!("wat");
 
                 // Send message to backend
                 if let Some(tx) = &self.backend_tx {
                     let msg = BackendMsg::ProcessImage(vec![0; 1024]); // Example image data
-                    tx.send(msg).unwrap();
+
+                    // Spawn a new task to send the message
+                    let mut tx = tx.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = tx.send(msg).await {
+                            eprintln!("Failed to send message to backend: {:?}", e);
+                        }
+                    });
                 }
             }
         }
@@ -84,5 +91,14 @@ impl Example {
         let content = column![button];
 
         center(content).into()
+    }
+
+    fn subscription(&self) -> iced::Subscription<Message> {
+        // Subscribe to messages from the backend
+        if let Some(rx) = &self.frontend_rx {
+            iced::Subscription::none()
+        } else {
+            iced::Subscription::none()
+        }
     }
 }

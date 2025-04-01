@@ -1,27 +1,32 @@
 use anyhow::Result;
-use tracing_subscriber::{filter::Targets, fmt, prelude::*, Registry};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 
 pub fn init_logging() -> Result<()> {
-    let log_level = if cfg!(debug_assertions) {
-        tracing::Level::DEBUG
+    // Default log level based on build configuration
+    let default_log_level = if cfg!(debug_assertions) {
+        "debug"
     } else {
-        tracing::Level::INFO
+        "info"
     };
 
-    let target_name = env!("CARGO_PKG_NAME");
-    let stdout_filter = Targets::new()
-        .with_default(tracing::Level::ERROR)
-        .with_target(target_name, log_level);
+    // Extract the crate name from the module path
+    let crate_name = module_path!().split("::").next().unwrap_or("");
 
-    // Configure stdout layer
+    // Create an EnvFilter that respects RUST_LOG environment variable
+    // If RUST_LOG is not set, use our default configuration
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(format!("error,{}={}", crate_name, default_log_level)));
+    println!("Log level: {}", filter);
+
+    // Configure stdout layer with EnvFilter
     let stdout_layer = fmt::layer()
         .with_target(true)
         .with_thread_ids(true)
         .with_line_number(true)
         .with_file(true)
-        .with_filter(stdout_filter);
+        .with_filter(filter);
 
-    // Combine both layers
+    // Initialize the subscriber
     Registry::default().with(stdout_layer).init();
 
     Ok(())

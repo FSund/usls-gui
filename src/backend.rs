@@ -1,6 +1,10 @@
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
-use std::thread;
+// use tokio::sync::mpsc::{Receiver, Sender};
+use anyhow::Result;
+use futures::{
+    channel::mpsc::{Receiver, Sender},
+    SinkExt, StreamExt,
+};
+// use iced::Result;
 
 #[derive(Debug, Clone)]
 pub enum BackendMsg {
@@ -50,50 +54,65 @@ impl Backend {
         }
     }
 
-    pub fn run(&mut self) {
-        while let Ok(msg) = self.receiver.recv() {
-            log::debug!("Received message: {:?}", msg);
-
-            // Handle messages from the frontend
-            match msg {
-                BackendMsg::ProcessImage(image_data) => {
-                    // Send progress updates while processing
-                    self.sender.send(FrontendMsg::Progress(0.0)).unwrap();
-
-                    // Do the actual detection work
-                    match self.process_image(&image_data) {
-                        Ok(detections) => {
-                            self.sender.send(FrontendMsg::Progress(1.0)).unwrap();
-                            self.sender
-                                .send(FrontendMsg::DetectionResults(detections))
-                                .unwrap();
+    pub async fn run(&mut self) {
+        loop {
+            match self.receiver.next().await {
+                Some(msg) => {
+                    log::debug!("Received message: {:?}", msg);
+                    match msg {
+                        BackendMsg::ProcessImage(image_data) => {
+                            // Process the image data
+                            match self.process_image(&image_data).await {
+                                Ok(detections) => {
+                                    // Send results to frontend
+                                    let _ = self
+                                        .sender
+                                        .send(FrontendMsg::DetectionResults(detections))
+                                        .await;
+                                }
+                                Err(e) => {
+                                    // Handle error
+                                    let _ =
+                                        self.sender.send(FrontendMsg::Error(e.to_string())).await;
+                                }
+                            }
                         }
-                        Err(e) => {
-                            self.sender.send(FrontendMsg::Error(e.to_string())).unwrap();
+                        BackendMsg::UpdateParams(_params) => {
+                            // Update detection parameters
+                            // ...
+                        }
+                        BackendMsg::Stop => {
+                            break; // Stop processing
                         }
                     }
                 }
-                BackendMsg::UpdateParams(params) => {
-                    // Update detection parameters
-                }
-                BackendMsg::Stop => {
-                    break;
-                }
+                None => break, // Channel closed
             }
         }
     }
 
-    fn process_image(
-        &self,
-        image_data: &[u8],
-    ) -> Result<Vec<Detection>, Box<dyn std::error::Error>> {
+    async fn process_image(&self, _image_data: &[u8]) -> Result<Vec<Detection>> {
         // Perform object detection
         // This is where your ML model or algorithm would run
 
+        let mut sender = self.sender.clone();
+
         // For progress updates during long operations:
-        self.sender.send(FrontendMsg::Progress(0.3)).unwrap();
+        sender.send(FrontendMsg::Progress(0.3)).await?;
+
+        // Simulate CPU-intensive processing with a blocking sleep
+        tokio::task::spawn_blocking(|| {
+            log::debug!("Simulating CPU-intensive work for 10 seconds");
+            std::thread::sleep(std::time::Duration::from_secs(10));
+
+            // Any CPU-intensive work would go here
+            // ...
+        })
+        .await?;
+        log::debug!("Work completed!");
+
         // ... more processing ...
-        self.sender.send(FrontendMsg::Progress(0.7)).unwrap();
+        sender.send(FrontendMsg::Progress(0.7)).await?;
 
         // Return detected objects
         Ok(vec![/* detected objects */])

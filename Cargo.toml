@@ -6,9 +6,11 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.97"
 argh = "0.1.13"
-iced = "0.13.1"
+futures = "0.3.31"
+iced = { version = "0.13.1", features = ["tokio", "image"] }
 log = "0.4.27"
 ort = { version = "2.0.0-rc.9", default-features = false, features = ["cuda", "ndarray", "copy-dylibs", "half"] }
+tokio = { version = "1.44.1", features = ["sync"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = [ "env-filter", "fmt", "chrono" ] }
 usls = { git = "https://github.com/jamjamjon/usls", rev = "1186904", features = [ "cuda" ] }
