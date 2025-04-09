@@ -8,6 +8,7 @@ use futures::{
 use image::DynamicImage;
 use std::{default, future::Future, sync::Arc};
 // use iced::Result;
+use usls::{models::GroundingDINO, Annotator, DataLoader, Options};
 
 #[derive(Debug, Clone)]
 pub enum Input {
@@ -51,15 +52,30 @@ pub struct Backend {
     // sender: Sender<Output>,
     // Detection model and other resources
     params: DetectionParams,
+    model: GroundingDINO,
 }
 
 impl Default for Backend {
     fn default() -> Self {
+        let options = Options::grounding_dino()
+            .with_model_file("./weights/grounding-dino/swint-ogc.onnx")
+            // .with_model_file("./weights/grounding-dino/swint-ogc-fp16.onnx")
+            // .with_model_dtype(args.dtype.as_str().try_into()?) // remember to download weights if you change dtype
+            // .with_model_device(args.device.as_str().try_into()?)
+            // .with_text_names(&args.labels.iter().map(|x| x.as_str()).collect::<Vec<_>>())
+            .with_class_confs(&[0.25])
+            .with_text_confs(&[0.25])
+            .commit()
+            .expect("Failed to create options");
+
+        let model = GroundingDINO::new(options).expect("Failed to create model");
+
         Backend {
             params: DetectionParams {
                 confidence_threshold: 0.5,
                 overlap_threshold: 0.5,
             },
+            model,
         }
     }
 }
@@ -114,8 +130,8 @@ impl Backend {
     // }
 
     async fn process_image(
-        &self,
-        _image_data: &Arc<DynamicImage>,
+        &mut self,
+        image_data: &Arc<DynamicImage>,
         sender: Sender<Output>,
     ) -> Result<Vec<Detection>> {
         // Perform object detection
@@ -136,6 +152,9 @@ impl Backend {
         })
         .await?;
         log::debug!("Work completed!");
+
+        let image = image_data.as_ref().clone();
+        let ys = self.model.forward(&[image])?;
 
         // ... more processing ...
         sender.send(Output::Progress(0.7)).await?;
