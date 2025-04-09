@@ -5,18 +5,20 @@ use futures::{
     channel::mpsc::{Receiver, Sender},
     stream, SinkExt, StreamExt,
 };
-use std::future::Future;
+use image::DynamicImage;
+use std::{default, future::Future, sync::Arc};
 // use iced::Result;
 
 #[derive(Debug, Clone)]
 pub enum Input {
-    ProcessImage(Vec<u8>),
+    ProcessImage(Arc<DynamicImage>),
     UpdateParams(DetectionParams),
     Stop,
 }
 
+#[derive(Debug, Clone)]
 pub enum Output {
-    // Ready(Sender<Input>),
+    Ready(Sender<Input>),
     DetectionResults(Vec<Detection>),
     Progress(f32),
     Error(String),
@@ -45,65 +47,81 @@ pub struct DetectionParams {
 }
 
 pub struct Backend {
-    receiver: Receiver<Input>,
-    sender: Sender<Output>,
+    // receiver: Receiver<Input>,
+    // sender: Sender<Output>,
     // Detection model and other resources
+    params: DetectionParams,
+}
+
+impl Default for Backend {
+    fn default() -> Self {
+        Backend {
+            params: DetectionParams {
+                confidence_threshold: 0.5,
+                overlap_threshold: 0.5,
+            },
+        }
+    }
 }
 
 impl Backend {
-    pub fn new(receiver: Receiver<Input>, sender: Sender<Output>) -> Self {
+    pub fn new() -> Self {
         Backend {
-            receiver,
-            sender,
-            // Initialize detection model and other resources
+            ..Default::default() // receiver,
+                                 // sender,
+                                 // Initialize detection model and other resources
         }
     }
 
-    pub async fn run(&mut self) {
-        loop {
-            match self.receiver.next().await {
-                Some(msg) => {
-                    log::debug!("Received message: {:?}", msg);
-                    match msg {
-                        Input::ProcessImage(image_data) => {
-                            // Process the image data
-                            match self.process_image(&image_data).await {
-                                Ok(detections) => {
-                                    // Send results to frontend
-                                    let _ = self
-                                        .sender
-                                        .send(Output::DetectionResults(detections))
-                                        .await;
-                                }
-                                Err(e) => {
-                                    // Handle error
-                                    let _ = self.sender.send(Output::Error(e.to_string())).await;
-                                }
-                            }
-                        }
-                        Input::UpdateParams(_params) => {
-                            // Update detection parameters
-                            // ...
-                        }
-                        Input::Stop => {
-                            break; // Stop processing
-                        }
-                    }
-                }
-                None => {
-                    // Channel closed
-                    log::debug!("Receiver channel closed");
-                    break;
-                }
-            }
-        }
-    }
+    // pub async fn run(&mut self) {
+    //     loop {
+    //         match self.receiver.next().await {
+    //             Some(msg) => {
+    //                 log::debug!("Received message: {:?}", msg);
+    //                 match msg {
+    //                     Input::ProcessImage(image_data) => {
+    //                         // Process the image data
+    //                         match self.process_image(&image_data).await {
+    //                             Ok(detections) => {
+    //                                 // Send results to frontend
+    //                                 let _ = self
+    //                                     .sender
+    //                                     .send(Output::DetectionResults(detections))
+    //                                     .await;
+    //                             }
+    //                             Err(e) => {
+    //                                 // Handle error
+    //                                 let _ = self.sender.send(Output::Error(e.to_string())).await;
+    //                             }
+    //                         }
+    //                     }
+    //                     Input::UpdateParams(_params) => {
+    //                         // Update detection parameters
+    //                         // ...
+    //                     }
+    //                     Input::Stop => {
+    //                         break; // Stop processing
+    //                     }
+    //                 }
+    //             }
+    //             None => {
+    //                 // Channel closed
+    //                 log::debug!("Receiver channel closed");
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // }
 
-    async fn process_image(&self, _image_data: &[u8]) -> Result<Vec<Detection>> {
+    async fn process_image(
+        &self,
+        _image_data: &Arc<DynamicImage>,
+        sender: Sender<Output>,
+    ) -> Result<Vec<Detection>> {
         // Perform object detection
         // This is where your ML model or algorithm would run
 
-        let mut sender = self.sender.clone();
+        let mut sender = sender.clone();
 
         // For progress updates during long operations:
         sender.send(Output::Progress(0.3)).await?;
@@ -149,8 +167,13 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
         // Create channel
         let (sender, mut receiver) = mpsc::channel(100);
 
+        let mut backend = Backend::new();
+
         // Send the sender back to the application
-        output.send(Output::Ready(sender)).await;
+        output
+            .send(Output::Ready(sender))
+            .await
+            .expect("Failed to send sender");
 
         loop {
             // Read next input sent from `Application`
@@ -159,14 +182,25 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
             match input {
                 Input::ProcessImage(image) => {
                     // Do some async work...
+                    backend
+                        .process_image(&image, output.clone())
+                        .await
+                        .expect("Failed to process image");
 
                     // Finally, we can optionally produce a message to tell the
                     // `Application` the work is done
-                    output.send(Output::Progress(1.0)).await;
+                    output
+                        .send(Output::Progress(1.0))
+                        .await
+                        .expect("Failed to send progress");
+
+                    output
+                        .send(Output::DetectionResults(vec![]))
+                        .await
+                        .expect("Failed to send detection results");
                 }
                 Input::UpdateParams(params) => {
-                    // Update parameters
-                    // ...
+                    backend.params = params;
                 }
                 Input::Stop => {
                     // Stop processing
@@ -176,3 +210,15 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
         }
     })
 }
+
+// fn connect() -> impl futures::stream::Stream<Item = Output> {
+//     let (sender, mut receiver): (Sender<Input>, Receiver<Input>) = mpsc::channel(100);
+//     let backend = Backend::new();
+
+//     async_stream::stream! {
+//         let mut rx = receiver;
+//         while let Some(input) = rx.next().await {
+//             yield Output::Progress(0.0);
+//         }
+//     }
+// }
