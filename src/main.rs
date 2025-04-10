@@ -2,9 +2,10 @@ mod backend;
 mod frontend;
 mod io;
 mod logging;
+mod screen;
 
 // use backend::{Backend, Input, Output};
-use frontend::Example;
+use frontend::ZeroShotRust;
 
 use anyhow::Context;
 // use futures::{SinkExt, Stream, StreamExt};
@@ -22,8 +23,12 @@ pub fn main() -> anyhow::Result<()> {
     logging::init_logging()?;
     log::info!("Starting the application...");
 
-    iced::application(Example::title, Example::update, Example::view)
-        .subscription(Example::subscription)
-        .run_with(Example::new)
-        .context("Failed to run the application")
+    iced::application(
+        ZeroShotRust::title,
+        ZeroShotRust::update,
+        ZeroShotRust::view,
+    )
+    .subscription(ZeroShotRust::subscription)
+    .run_with(ZeroShotRust::new)
+    .context("Failed to run the application")
 }

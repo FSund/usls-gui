@@ -40,11 +40,12 @@ pub struct BoundingBox {
     height: f32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct DetectionParams {
     confidence_threshold: f32,
     overlap_threshold: f32,
     // Other parameters
+    class_names: Vec<String>,
 }
 
 pub struct Backend {
@@ -57,23 +58,34 @@ pub struct Backend {
 
 impl Default for Backend {
     fn default() -> Self {
+        let class_names = vec![
+            "person".to_string(),
+            "car".to_string(),
+            "bus".to_string(),
+            // Add more class names as needed
+        ];
+
         let options = Options::grounding_dino()
             .with_model_file("./weights/grounding-dino/swint-ogc.onnx")
             // .with_model_file("./weights/grounding-dino/swint-ogc-fp16.onnx")
             // .with_model_dtype(args.dtype.as_str().try_into()?) // remember to download weights if you change dtype
             // .with_model_device(args.device.as_str().try_into()?)
             // .with_text_names(&args.labels.iter().map(|x| x.as_str()).collect::<Vec<_>>())
+            .with_text_names(&class_names.iter().map(|x| x.as_str()).collect::<Vec<_>>())
             .with_class_confs(&[0.25])
             .with_text_confs(&[0.25])
             .commit()
             .expect("Failed to create options");
 
+        log::info!("Creating model with options: {:?}", options);
         let model = GroundingDINO::new(options).expect("Failed to create model");
+        log::info!("Model initialized");
 
         Backend {
             params: DetectionParams {
                 confidence_threshold: 0.5,
                 overlap_threshold: 0.5,
+                class_names: class_names.clone(),
             },
             model,
         }
@@ -83,9 +95,7 @@ impl Default for Backend {
 impl Backend {
     pub fn new() -> Self {
         Backend {
-            ..Default::default() // receiver,
-                                 // sender,
-                                 // Initialize detection model and other resources
+            ..Default::default()
         }
     }
 
@@ -154,6 +164,8 @@ impl Backend {
         log::debug!("Work completed!");
 
         let image = image_data.as_ref().clone();
+
+        log::info!("Processing image");
         let ys = self.model.forward(&[image])?;
 
         // ... more processing ...
