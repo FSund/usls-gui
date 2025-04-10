@@ -12,8 +12,7 @@ use std::sync::Arc;
 pub struct ZeroShotRust {
     screen: Screen,
     pub image: Option<Arc<DynamicImage>>,
-    backend_tx: Option<futures::channel::mpsc::Sender<backend::Input>>,
-
+    pub backend_tx: Option<futures::channel::mpsc::Sender<backend::Input>>,
     pub inference_state: screen::inference::InferenceState,
 }
 
@@ -23,6 +22,8 @@ pub enum Message {
     LoadImage,
     ImageLoaded(Result<image::DynamicImage, io::LoadError>),
     Backend(backend::Output),
+
+    GoToScreen(Screen),
 }
 
 impl Default for ZeroShotRust {
@@ -42,7 +43,13 @@ impl ZeroShotRust {
             Self {
                 ..Default::default()
             },
-            Task::none(),
+            Task::perform(
+                async {
+                    // Wait for some time to simulate loading
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                },
+                |_| Message::GoToScreen(Screen::Inference),
+            ),
         )
     }
 
@@ -56,10 +63,10 @@ impl ZeroShotRust {
                 backend::Output::Ready(tx) => {
                     log::info!("Backend is ready!");
                     self.backend_tx = Some(tx.clone());
+                    self.inference_state.model_description = Some("GroundingDINO".to_string());
                     self.screen = Screen::Inference;
-                    Task::none()
                 }
-                _ => Task::none(),
+                _ => todo!("Handle other backend outputs"),
             },
             Message::Detect(image) => {
                 // No need to pass the image here
@@ -78,15 +85,13 @@ impl ZeroShotRust {
                         }
                     });
                 }
-
-                Task::none()
             }
             Message::LoadImage => {
                 log::debug!("Load Image button pressed!");
 
                 // Open file dialog to load an image
                 self.inference_state.selecting_image = true;
-                Task::perform(io::open_image(), Message::ImageLoaded)
+                return Task::perform(io::open_image(), Message::ImageLoaded);
             }
             Message::ImageLoaded(result) => {
                 self.inference_state.selecting_image = false;
@@ -96,9 +101,13 @@ impl ZeroShotRust {
                 } else {
                     log::error!("Failed to load image: {:?}", result);
                 }
-                Task::none()
+            }
+            Message::GoToScreen(screen) => {
+                log::info!("Switching to screen: {:?}", screen);
+                self.screen = screen;
             }
         }
+        Task::none()
     }
 
     pub fn view(&self) -> Element<Message> {

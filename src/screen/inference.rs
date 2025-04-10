@@ -83,15 +83,23 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
         .align_y(iced::alignment::Vertical::Center)
         .align_x(iced::alignment::Horizontal::Center);
 
-    let load_image_button = if app.inference_state.selecting_image {
-        button("Load Image")
-    } else {
-        button("Load Image").on_press(Message::LoadImage)
+    let mut load_image_button = button("Load Image");
+    if !app.inference_state.selecting_image {
+        load_image_button = load_image_button.on_press(Message::LoadImage);
     };
-    let detect_button = if let Some(image) = &app.image {
-        button("Run detection").on_press(Message::Detect(image.clone()))
+
+    let mut detect_button = button("Run detection");
+    if let Some(image) = &app.image {
+        if app.backend_tx.is_some() {
+            detect_button = detect_button.on_press(Message::Detect(image.clone()));
+        };
+    };
+
+    let model_description = if let Some(model_description) = &app.inference_state.model_description
+    {
+        text(format!("{} is ready!", model_description))
     } else {
-        button("Run detection")
+        text("Initializing model...")
     };
 
     let menu = row![load_image_button, detect_button]
@@ -103,6 +111,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
         Space::new(Length::Fill, Length::Fill),
         image,
         menu,
+        model_description,
         Space::new(Length::Fill, Length::Fill),
     ]
     .align_x(iced::alignment::Horizontal::Center);
@@ -113,12 +122,14 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
 #[derive(Debug, Clone)]
 pub struct InferenceState {
     pub selecting_image: bool,
+    pub model_description: Option<String>,
 }
 
 impl Default for InferenceState {
     fn default() -> Self {
         Self {
             selecting_image: false,
+            model_description: None,
         }
     }
 }
