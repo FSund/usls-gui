@@ -10,6 +10,21 @@ use std::{default, future::Future, sync::Arc};
 // use iced::Result;
 use usls::{models::GroundingDINO, Annotator, DataLoader, Options};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Models {
+    Mock,
+    GroundingDINO,
+}
+
+impl std::fmt::Display for Models {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Mock => "Mock",
+            Self::GroundingDINO => "GroundingDINO",
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Input {
     ProcessImage(Arc<DynamicImage>),

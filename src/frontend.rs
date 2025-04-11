@@ -27,13 +27,13 @@ pub enum Message {
     Backend(backend::Output),
     DetectionStarted,
     DetectionFinished,
+    SelectModel(backend::Models),
 
     GoToScreen(Screen),
 }
 
 impl Default for ZeroShotRust {
     fn default() -> Self {
-        // let image = image::load_from_memory(DEFAULT_IMAGE).ok().map(Arc::new);
         Self {
             screen: Screen::Loading,
             image: None,
@@ -53,7 +53,8 @@ impl ZeroShotRust {
                 async {
                     // Wait for some time to simulate loading
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    image::load_from_memory(DEFAULT_IMAGE)
+                    // image::load_from_memory(DEFAULT_IMAGE)
+                    Err(io::LoadError::FileError)
                 },
                 |image| {
                     if let Ok(image) = image {
@@ -129,6 +130,9 @@ impl ZeroShotRust {
             }
             Message::DetectionFinished => {
                 self.inference_state.busy = false;
+            }
+            Message::SelectModel(_model) => {
+                todo!("Implement model selection");
             }
         }
         Task::none()

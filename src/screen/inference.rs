@@ -6,7 +6,7 @@ use crate::frontend::{Message, ZeroShotRust};
 // use std::sync::Arc;
 // use iced::border;
 // use iced::keyboard;
-use iced::widget::canvas::Stroke;
+use iced::widget::canvas::{Path, Stroke};
 use iced::widget::{
     button, canvas, center, checkbox, column, container, horizontal_space, pick_list, row,
     scrollable, text, Space,
@@ -35,7 +35,10 @@ use tokio::time::error::Elapsed;
 // pub const DEFAULT_IMAGE: &[u8] =
 //     include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/bus.jpg"));
 
-fn square<'a>(size: impl Into<Length> + Copy) -> Element<'a, Message> {
+fn square<'a>(
+    width: impl Into<Length> + Copy,
+    height: impl Into<Length> + Copy,
+) -> Element<'a, Message> {
     struct Square;
 
     impl canvas::Program<Message> for Square {
@@ -53,10 +56,20 @@ fn square<'a>(size: impl Into<Length> + Copy) -> Element<'a, Message> {
 
             let palette = theme.extended_palette();
 
+            // debugging //
+            // let rect = Rectangle::with_size((480, 640).into());
+            let rect = Path::rectangle((0.0, 0.0).into(), (480.0, 640.0).into());
+            // let color = iced::Color::from_rgb8(255, 0, 0);
+            // let style = iced::widget::canvas::Style::Solid(color);
+            // let fill = iced::widget::canvas::Fill::default();
+            let fill: canvas::Fill = iced::Color::from_rgb8(255, 0, 0).into();
+            frame.fill(&rect, fill);
+
             frame.fill_rectangle(
                 Point::ORIGIN,
                 bounds.size(),
-                palette.background.strong.color,
+                // palette.background.strong.color,
+                iced::Color::from_rgba(0.5, 0.5, 0.5, 0.5),
             );
 
             frame.stroke_rectangle(
@@ -70,11 +83,11 @@ fn square<'a>(size: impl Into<Length> + Copy) -> Element<'a, Message> {
             let center = frame.center();
             frame.translate(Vector::new(center.x, center.y));
 
-            let r = Rectangle::with_radius(50.0);
+            let r = Rectangle::with_radius(72.0);
             frame.fill_rectangle(
                 (r.x, r.y).into(),
                 r.size(),
-                iced::Color::from_rgb(0.5, 0.5, 0.5),
+                iced::Color::from_rgba(0.5, 0.5, 0.5, 0.5),
             );
 
             // let im = iced::widget::image::Handle::from_bytes(DEFAULT_IMAGE.to_vec());
@@ -84,7 +97,7 @@ fn square<'a>(size: impl Into<Length> + Copy) -> Element<'a, Message> {
         }
     }
 
-    canvas(Square).width(size).height(size).into()
+    canvas(Square).width(width).height(height).into()
 }
 
 pub fn view(app: &ZeroShotRust) -> Element<Message> {
@@ -100,12 +113,16 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
     } else {
         // let im = iced::widget::image::Handle::from_bytes(DEFAULT_IMAGE.to_vec());
         // iced::widget::image(im)
-        square(480)
+        square(640, 480)
     };
     let image = container(image)
         .padding(10)
-        .max_width(480)
-        .max_height(640)
+        .width(640)
+        .height(480)
+        // .max_width(480)
+        // .max_height(640)
+        // .width(Length::Fixed(640.0))
+        // .height(Length::Fixed(480.0))
         .align_y(iced::alignment::Vertical::Center)
         .align_x(iced::alignment::Horizontal::Center);
 
@@ -120,6 +137,14 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
             detect_button = detect_button.on_press(Message::Detect(image.clone()));
         };
     };
+
+    let models = vec![backend::Models::Mock, backend::Models::GroundingDINO];
+    let model_list = pick_list(
+        models,
+        app.inference_state.selected_model.clone(),
+        Message::SelectModel,
+    )
+    .placeholder("Select a model");
 
     let model_description = if let Some(model_description) = &app.inference_state.model_description
     {
@@ -137,6 +162,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
         Space::new(Length::Fill, Length::Fill),
         image,
         menu,
+        model_list,
         model_description,
         Space::new(Length::Fill, Length::Fill),
     ]
@@ -148,6 +174,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
 #[derive(Debug, Clone)]
 pub struct InferenceState {
     pub selecting_image: bool,
+    pub selected_model: Option<backend::Models>,
     pub model_description: Option<String>,
     pub busy: bool,
     pub detections: Vec<backend::Detection>,
@@ -158,6 +185,7 @@ impl Default for InferenceState {
     fn default() -> Self {
         Self {
             selecting_image: false,
+            selected_model: None,
             model_description: None,
             busy: false,
             detections: vec![],
