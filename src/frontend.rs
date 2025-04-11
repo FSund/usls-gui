@@ -8,6 +8,9 @@ use iced::{Element, Subscription, Task};
 use image::DynamicImage;
 use std::sync::Arc;
 
+pub const DEFAULT_IMAGE: &[u8] =
+    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/bus.jpg"));
+
 // #[derive(Default)]
 pub struct ZeroShotRust {
     screen: Screen,
@@ -22,12 +25,15 @@ pub enum Message {
     LoadImage,
     ImageLoaded(Result<image::DynamicImage, io::LoadError>),
     Backend(backend::Output),
+    DetectionStarted,
+    DetectionFinished,
 
     GoToScreen(Screen),
 }
 
 impl Default for ZeroShotRust {
     fn default() -> Self {
+        // let image = image::load_from_memory(DEFAULT_IMAGE).ok().map(Arc::new);
         Self {
             screen: Screen::Loading,
             image: None,
@@ -47,9 +53,17 @@ impl ZeroShotRust {
                 async {
                     // Wait for some time to simulate loading
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    image::load_from_memory(DEFAULT_IMAGE)
                 },
-                |_| Message::GoToScreen(Screen::Inference),
-            ),
+                |image| {
+                    if let Ok(image) = image {
+                        Message::ImageLoaded(Ok(image))
+                    } else {
+                        Message::ImageLoaded(Err(io::LoadError::FileError))
+                    }
+                },
+            )
+            .chain(Task::done(Message::GoToScreen(Screen::Inference))),
         )
     }
 
@@ -66,24 +80,28 @@ impl ZeroShotRust {
                     self.inference_state.model_description = Some("GroundingDINO".to_string());
                     self.screen = Screen::Inference;
                 }
+                backend::Output::Progress(progress) => {
+                    if progress >= 1.0 {
+                        return Task::done(Message::DetectionFinished);
+                    };
+                }
                 _ => todo!("Handle other backend outputs"),
             },
             Message::Detect(image) => {
-                // No need to pass the image here
                 log::debug!("Button pressed!");
 
                 // Send message to backend
-
-                let msg = Input::ProcessImage(image);
-
-                // Spawn a new task to send the message
-                if let Some(tx) = &self.backend_tx {
+                if let Some(tx) = self.backend_tx.clone() {
+                    let msg = Input::ProcessImage(image);
                     let mut tx = tx.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = tx.send(msg).await {
-                            eprintln!("Failed to send message to backend: {:?}", e);
-                        }
-                    });
+                    return Task::perform(
+                        async move {
+                            if let Err(e) = tx.send(msg).await {
+                                eprintln!("Failed to send message to backend: {:?}", e);
+                            }
+                        },
+                        |_| Message::DetectionStarted,
+                    );
                 }
             }
             Message::LoadImage => {
@@ -105,6 +123,12 @@ impl ZeroShotRust {
             Message::GoToScreen(screen) => {
                 log::info!("Switching to screen: {:?}", screen);
                 self.screen = screen;
+            }
+            Message::DetectionStarted => {
+                self.inference_state.busy = true;
+            }
+            Message::DetectionFinished => {
+                self.inference_state.busy = false;
             }
         }
         Task::none()

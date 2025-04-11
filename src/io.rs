@@ -1,9 +1,16 @@
+use std::path::Path;
+
 use rfd::AsyncFileDialog;
 
 #[derive(Debug, Clone)]
 pub enum LoadError {
     Cancelled,
     FileError,
+}
+
+pub fn load_image(path: &Path) -> Result<image::DynamicImage, LoadError> {
+    let image = image::open(path).or(Err(LoadError::FileError))?;
+    Ok(image.into())
 }
 
 pub async fn open_image() -> Result<image::DynamicImage, LoadError> {
@@ -13,6 +20,5 @@ pub async fn open_image() -> Result<image::DynamicImage, LoadError> {
         .await
         .ok_or(LoadError::Cancelled)?;
 
-    let image = image::open(file.path()).or(Err(LoadError::FileError))?;
-    Ok(image.into())
+    load_image(file.path())
 }

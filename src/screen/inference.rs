@@ -1,15 +1,18 @@
 // use crate::backend::{Input, Output};
+use crate::backend;
 use crate::frontend::{Message, ZeroShotRust};
 // use crate::io;
 
 // use std::sync::Arc;
 // use iced::border;
 // use iced::keyboard;
-use iced::mouse;
+use iced::widget::canvas::Stroke;
 use iced::widget::{
     button, canvas, center, checkbox, column, container, horizontal_space, pick_list, row,
     scrollable, text, Space,
 };
+use iced::{mouse, Vector};
+// use iced::Size;
 use iced::{
     color, Center, Element, Fill, Font, Length, Point, Rectangle, Renderer, Subscription, Task,
     Theme,
@@ -28,7 +31,9 @@ use tokio::time::error::Elapsed;
 // use std::thread;
 // use tracing::instrument::WithSubscriber;
 
-// pub const DEFAULT_IMAGE: &[u8] = include_bytes!("../assets/bus.jpg");
+// pub const DEFAULT_IMAGE: &[u8] = include_bytes!("../../assets/bus.jpg");
+// pub const DEFAULT_IMAGE: &[u8] =
+//     include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/bus.jpg"));
 
 fn square<'a>(size: impl Into<Length> + Copy) -> Element<'a, Message> {
     struct Square;
@@ -53,6 +58,27 @@ fn square<'a>(size: impl Into<Length> + Copy) -> Element<'a, Message> {
                 bounds.size(),
                 palette.background.strong.color,
             );
+
+            frame.stroke_rectangle(
+                Point::ORIGIN,
+                (10.0, 10.0).into(),
+                Stroke {
+                    ..Stroke::default()
+                },
+            );
+
+            let center = frame.center();
+            frame.translate(Vector::new(center.x, center.y));
+
+            let r = Rectangle::with_radius(50.0);
+            frame.fill_rectangle(
+                (r.x, r.y).into(),
+                r.size(),
+                iced::Color::from_rgb(0.5, 0.5, 0.5),
+            );
+
+            // let im = iced::widget::image::Handle::from_bytes(DEFAULT_IMAGE.to_vec());
+            // frame.draw_image(Rectangle::with_radius(480.0), &im);
 
             vec![frame.into_geometry()]
         }
@@ -90,7 +116,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
 
     let mut detect_button = button("Run detection");
     if let Some(image) = &app.image {
-        if app.backend_tx.is_some() {
+        if app.backend_tx.is_some() && !app.inference_state.busy {
             detect_button = detect_button.on_press(Message::Detect(image.clone()));
         };
     };
@@ -123,6 +149,9 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
 pub struct InferenceState {
     pub selecting_image: bool,
     pub model_description: Option<String>,
+    pub busy: bool,
+    pub detections: Vec<backend::Detection>,
+    pub image: Option<iced::advanced::image::Handle>,
 }
 
 impl Default for InferenceState {
@@ -130,6 +159,9 @@ impl Default for InferenceState {
         Self {
             selecting_image: false,
             model_description: None,
+            busy: false,
+            detections: vec![],
+            image: None,
         }
     }
 }
