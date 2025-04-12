@@ -1,0 +1,1 @@
+A WIP frontend for running computer vision models in pure Rust via [usls](https://github.com/jamjamjon/usls).
