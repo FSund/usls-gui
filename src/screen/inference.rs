@@ -100,8 +100,104 @@ fn square<'a>(
     canvas(Square).width(width).height(height).into()
 }
 
+#[derive(Debug, Clone)]
+pub struct Image {
+    image: Option<iced::advanced::image::Handle>,
+    width: u32,
+    height: u32,
+}
+
+impl Image {
+    pub fn new(image: &image::DynamicImage) -> Self {
+        let rgba = image.to_rgba8(); // copies image!
+        let handle = iced::advanced::image::Handle::from_rgba(
+            rgba.width(),
+            rgba.height(),
+            rgba.as_raw().to_vec(),
+        );
+        Self {
+            image: Some(handle),
+            width: rgba.width(),
+            height: rgba.height(),
+        }
+    }
+}
+
+impl Default for Image {
+    fn default() -> Self {
+        Self {
+            image: None,
+            width: 640,
+            height: 480,
+        }
+    }
+}
+
+impl canvas::Program<Message> for Image {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+
+        let palette = theme.extended_palette();
+
+        // debugging //
+        // let rect = Rectangle::with_size((480, 640).into());
+        let rect = Path::rectangle((0.0, 0.0).into(), (480.0, 640.0).into());
+        // let color = iced::Color::from_rgb8(255, 0, 0);
+        // let style = iced::widget::canvas::Style::Solid(color);
+        // let fill = iced::widget::canvas::Fill::default();
+        let fill: canvas::Fill = iced::Color::from_rgb8(255, 0, 0).into();
+        frame.fill(&rect, fill);
+
+        frame.fill_rectangle(
+            Point::ORIGIN,
+            bounds.size(),
+            // palette.background.strong.color,
+            iced::Color::from_rgba(0.5, 0.5, 0.5, 0.5),
+        );
+
+        frame.stroke_rectangle(
+            Point::ORIGIN,
+            (10.0, 10.0).into(),
+            Stroke {
+                ..Stroke::default()
+            },
+        );
+
+        let center = frame.center();
+        frame.translate(Vector::new(center.x, center.y));
+
+        let r = Rectangle::with_radius(72.0);
+        frame.fill_rectangle(
+            (r.x, r.y).into(),
+            r.size(),
+            iced::Color::from_rgba(0.5, 0.5, 0.5, 0.5),
+        );
+
+        // let im = iced::widget::image::Handle::from_bytes(DEFAULT_IMAGE.to_vec());
+        // frame.draw_image(Rectangle::with_radius(480.0), &im);
+
+        if let Some(image) = &self.image {
+            // let bounds = Rectangle::with_radius(200.0);
+            let size: iced::Size<f32> = (self.width as f32, self.height as f32).into();
+            let bounds = Rectangle::with_size(size);
+            frame.draw_image(bounds, image);
+        }
+
+        vec![frame.into_geometry()]
+    }
+}
+
 pub fn view(app: &ZeroShotRust) -> Element<Message> {
-    let image = if let Some(image) = &app.image {
+    let image: Element<Message> = if let Some(image) = &app.image {
         // Convert DynamicImage to iced image
         let rgba = image.to_rgba8();
         let im = iced::advanced::image::Handle::from_rgba(
@@ -113,7 +209,12 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
     } else {
         // let im = iced::widget::image::Handle::from_bytes(DEFAULT_IMAGE.to_vec());
         // iced::widget::image(im)
-        square(640, 480)
+        // square(640, 480)
+
+        canvas(&app.inference_state.image)
+            .width(640)
+            .height(480)
+            .into()
     };
     let image = container(image)
         .padding(10)
@@ -178,7 +279,8 @@ pub struct InferenceState {
     pub model_description: Option<String>,
     pub busy: bool,
     pub detections: Vec<backend::Detection>,
-    pub image: Option<iced::advanced::image::Handle>,
+    // pub image: Option<iced::advanced::image::Handle>,
+    pub image: Image,
 }
 
 impl Default for InferenceState {
@@ -189,7 +291,7 @@ impl Default for InferenceState {
             model_description: None,
             busy: false,
             detections: vec![],
-            image: None,
+            image: Image::default(),
         }
     }
 }

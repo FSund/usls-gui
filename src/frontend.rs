@@ -1,6 +1,6 @@
 use crate::backend::Input;
 use crate::io;
-use crate::screen::Screen;
+use crate::screen::{inference, Screen};
 use crate::{backend, screen};
 
 use futures::{SinkExt, Stream, StreamExt};
@@ -110,12 +110,28 @@ impl ZeroShotRust {
 
                 // Open file dialog to load an image
                 self.inference_state.selecting_image = true;
+
                 return Task::perform(io::open_image(), Message::ImageLoaded);
             }
             Message::ImageLoaded(result) => {
                 self.inference_state.selecting_image = false;
+
                 if let Ok(image) = result {
                     log::info!("Image loaded successfully!");
+
+                    // TODO: make InferenceState::set_image or something instead
+                    // let image_handle = iced::widget::image::Handle::from_bytes(DEFAULT_IMAGE.to_vec());
+                    // self.inference_state.image = inference::Image::new(Some(image_handle));
+
+                    // Convert DynamicImage to iced image
+                    // let rgba = image.to_rgba8();
+                    // let handle = iced::advanced::image::Handle::from_rgba(
+                    //     rgba.width(),
+                    //     rgba.height(),
+                    //     rgba.as_raw().to_vec(),
+                    // );
+                    self.inference_state.image = inference::Image::new(&image);
+
                     self.image = Some(Arc::new(image));
                 } else {
                     log::error!("Failed to load image: {:?}", result);
