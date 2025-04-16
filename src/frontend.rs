@@ -86,6 +86,10 @@ impl ZeroShotRust {
                         return Task::done(Message::DetectionFinished);
                     };
                 }
+                backend::Output::Finished(results) => {
+                    log::info!("Detection finished!");
+                    todo!("Handle detection results");
+                }
                 _ => todo!("Handle other backend outputs"),
             },
             Message::Detect(image) => {

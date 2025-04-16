@@ -278,7 +278,7 @@ pub struct InferenceState {
     pub selected_model: Option<backend::Models>,
     pub model_description: Option<String>,
     pub busy: bool,
-    pub detections: Vec<backend::Detection>,
+    // pub detections: Vec<backend::Detection>,
     // pub image: Option<iced::advanced::image::Handle>,
     pub image: Image,
 }
@@ -290,7 +290,7 @@ impl Default for InferenceState {
             selected_model: None,
             model_description: None,
             busy: false,
-            detections: vec![],
+            // detections: vec![],
             image: Image::default(),
         }
     }

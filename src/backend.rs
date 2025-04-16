@@ -1,3 +1,6 @@
+pub mod mock;
+pub mod onnx;
+
 // use tokio::sync::mpsc::{Receiver, Sender};
 use anyhow::Result;
 use futures::{
@@ -35,9 +38,16 @@ pub enum Input {
 #[derive(Debug, Clone)]
 pub enum Output {
     Ready(Sender<Input>),
-    DetectionResults(Vec<Detection>),
     Progress(f32),
+    Finished(DetectionResults),
     Error(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct DetectionResults {
+    // detections: Vec<Detection>,
+    y: usls::Y,
+    annotated: DynamicImage,
 }
 
 #[derive(Debug, Clone)]
@@ -158,7 +168,7 @@ impl Backend {
         &mut self,
         image_data: &Arc<DynamicImage>,
         sender: Sender<Output>,
-    ) -> Result<Vec<Detection>> {
+    ) -> Result<DetectionResults> {
         // Perform object detection
         // This is where your ML model or algorithm would run
 
@@ -167,27 +177,36 @@ impl Backend {
         // For progress updates during long operations:
         sender.send(Output::Progress(0.3)).await?;
 
-        // Simulate CPU-intensive processing with a blocking sleep
-        tokio::task::spawn_blocking(|| {
-            log::debug!("Simulating CPU-intensive work for 10 seconds");
-            std::thread::sleep(std::time::Duration::from_secs(10));
+        // // Simulate CPU-intensive processing with a blocking sleep
+        // tokio::task::spawn_blocking(|| {
+        //     log::debug!("Simulating CPU-intensive work for 10 seconds");
+        //     std::thread::sleep(std::time::Duration::from_secs(10));
 
-            // Any CPU-intensive work would go here
-            // ...
-        })
-        .await?;
-        log::debug!("Work completed!");
+        //     // Any CPU-intensive work would go here
+        //     // ...
+        // })
+        // .await?;
+        // log::debug!("Work completed!");
 
-        let image = image_data.as_ref().clone();
+        let xs = vec![image_data.as_ref().clone()];
 
-        log::info!("Processing image");
-        let ys = self.model.forward(&[image])?;
-
-        // ... more processing ...
         sender.send(Output::Progress(0.7)).await?;
 
+        log::info!("Processing image");
+        let ys = tokio::task::block_in_place(|| self.model.forward(&xs))?;
+
+        let annotator = Annotator::default()
+            .with_bboxes_thickness(4)
+            .with_saveout(self.model.spec());
+        let annotated = annotator.plot(&xs, &ys, false)?;
+
+        let results = DetectionResults {
+            y: ys[0].clone(),
+            annotated: annotated.first().expect("No annotated image found").clone(),
+        };
+
         // Return detected objects
-        Ok(vec![/* detected objects */])
+        Ok(results)
     }
 }
 
@@ -228,7 +247,7 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
             match input {
                 Input::ProcessImage(image) => {
                     // Do some async work...
-                    backend
+                    let results = backend
                         .process_image(&image, output.clone())
                         .await
                         .expect("Failed to process image");
@@ -241,7 +260,7 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
                         .expect("Failed to send progress");
 
                     output
-                        .send(Output::DetectionResults(vec![]))
+                        .send(Output::Finished(results))
                         .await
                         .expect("Failed to send detection results");
                 }
