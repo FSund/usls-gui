@@ -11,10 +11,15 @@ futures = "0.3.31"
 iced = { version = "0.13.1", features = ["tokio", "image", "advanced", "canvas"] }
 image = "0.25.6"
 log = "0.4.27"
-ort = { version = "2.0.0-rc.9", default-features = false, features = ["cuda", "ndarray", "copy-dylibs", "half"] }
 rfd = "0.15.3"
 tokio = { version = "1.44.1", features = ["sync"] }
 tokio-stream = "0.1.17"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = [ "env-filter", "fmt", "chrono" ] }
-usls = { git = "https://github.com/jamjamjon/usls", rev = "1186904", features = [ "cuda" ] }
+usls = { git = "https://github.com/jamjamjon/usls", rev = "1186904", features = [ "auto", "cuda" ] }
+
+[dev-dependencies]
+ort = { version = "2.0.0-rc.9", default-features = false, features = ["cuda", "ndarray", "copy-dylibs", "half"] }
+
+[[example]]
+name = "grounding-dino"
