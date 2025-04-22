@@ -1,3 +1,6 @@
+pub mod mock;
+pub mod onnx;
+
 // use tokio::sync::mpsc::{Receiver, Sender};
 use anyhow::Result;
 use futures::{
@@ -11,12 +14,12 @@ use std::{default, future::Future, sync::Arc};
 use usls::{models::GroundingDINO, Annotator, DataLoader, Options};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Models {
+pub enum Model {
     Mock,
     GroundingDINO,
 }
 
-impl std::fmt::Display for Models {
+impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Mock => "Mock",
@@ -28,31 +31,39 @@ impl std::fmt::Display for Models {
 #[derive(Debug, Clone)]
 pub enum Input {
     ProcessImage(Arc<DynamicImage>),
-    UpdateParams(DetectionParams),
+    // UpdateParams(DetectionParams),
+    SetModel(Model),
     Stop,
 }
 
 #[derive(Debug, Clone)]
 pub enum Output {
     Ready(Sender<Input>),
-    DetectionResults(Vec<Detection>),
     Progress(f32),
+    Finished(DetectionResults),
     Error(String),
 }
 
 #[derive(Debug, Clone)]
-pub struct Detection {
-    class: String,
-    confidence: f32,
-    bounding_box: BoundingBox,
+pub struct DetectionResults {
+    detections: Detections,
+    // y: usls::Y,
+    annotated: DynamicImage,
 }
 
 #[derive(Debug, Clone)]
 pub struct BoundingBox {
+    class: String,
+    confidence: f32,
     x: f32,
     y: f32,
     width: f32,
     height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct Detections {
+    boxes: Vec<BoundingBox>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,55 +74,87 @@ pub struct DetectionParams {
     class_names: Vec<String>,
 }
 
+trait DetectionModel: Send {
+    fn detect(&mut self, image: &DynamicImage) -> Result<DetectionResults>;
+    // fn update_params(&mut self, params: &DetectionParams) -> Result<()>;
+    // fn clone_box(&self) -> Box<dyn DetectionModel>;
+}
+
 pub struct Backend {
     // receiver: Receiver<Input>,
     // sender: Sender<Output>,
     // Detection model and other resources
-    params: DetectionParams,
-    model: GroundingDINO,
+    // params: DetectionParams,
+    model: Box<dyn DetectionModel>,
 }
+
+// impl Default for Backend {
+//     fn default() -> Self {
+//         let class_names = vec![
+//             "person".to_string(),
+//             "car".to_string(),
+//             "bus".to_string(),
+//             // Add more class names as needed
+//         ];
+
+//         let options = Options::grounding_dino()
+//             .with_model_file("./weights/grounding-dino/swint-ogc.onnx")
+//             // .with_model_file("./weights/grounding-dino/swint-ogc-fp16.onnx")
+//             // .with_model_dtype(args.dtype.as_str().try_into()?) // remember to download weights if you change dtype
+//             // .with_model_device(args.device.as_str().try_into()?)
+//             // .with_text_names(&args.labels.iter().map(|x| x.as_str()).collect::<Vec<_>>())
+//             .with_text_names(&class_names.iter().map(|x| x.as_str()).collect::<Vec<_>>())
+//             .with_class_confs(&[0.25])
+//             .with_text_confs(&[0.25])
+//             .commit()
+//             .expect("Failed to create options");
+
+//         log::info!("Creating model with options: {:?}", options);
+//         let model = GroundingDINO::new(options).expect("Failed to create model");
+//         log::info!("Model initialized");
+
+//         Backend {
+//             params: DetectionParams {
+//                 confidence_threshold: 0.5,
+//                 overlap_threshold: 0.5,
+//                 class_names: class_names.clone(),
+//             },
+//             model,
+//         }
+//     }
+// }
 
 impl Default for Backend {
     fn default() -> Self {
-        let class_names = vec![
-            "person".to_string(),
-            "car".to_string(),
-            "bus".to_string(),
-            // Add more class names as needed
-        ];
-
-        let options = Options::grounding_dino()
-            .with_model_file("./weights/grounding-dino/swint-ogc.onnx")
-            // .with_model_file("./weights/grounding-dino/swint-ogc-fp16.onnx")
-            // .with_model_dtype(args.dtype.as_str().try_into()?) // remember to download weights if you change dtype
-            // .with_model_device(args.device.as_str().try_into()?)
-            // .with_text_names(&args.labels.iter().map(|x| x.as_str()).collect::<Vec<_>>())
-            .with_text_names(&class_names.iter().map(|x| x.as_str()).collect::<Vec<_>>())
-            .with_class_confs(&[0.25])
-            .with_text_confs(&[0.25])
-            .commit()
-            .expect("Failed to create options");
-
-        log::info!("Creating model with options: {:?}", options);
-        let model = GroundingDINO::new(options).expect("Failed to create model");
-        log::info!("Model initialized");
-
-        Backend {
-            params: DetectionParams {
-                confidence_threshold: 0.5,
-                overlap_threshold: 0.5,
-                class_names: class_names.clone(),
-            },
-            model,
-        }
+        Backend::new(Model::Mock).expect("Failed to create backend")
     }
 }
 
 impl Backend {
-    pub fn new() -> Self {
-        Backend {
-            ..Default::default()
-        }
+    pub fn new(model_type: Model) -> Result<Self> {
+        let class_names = vec!["person".to_string(), "car".to_string(), "bus".to_string()];
+
+        let params = DetectionParams {
+            confidence_threshold: 0.5,
+            overlap_threshold: 0.5,
+            class_names: class_names.clone(),
+        };
+
+        let model: Box<dyn DetectionModel> = match model_type {
+            Model::Mock => Box::new(mock::MockModel::new(&params)?),
+            Model::GroundingDINO => {
+                let options = Options::grounding_dino()
+                    .with_model_file("./weights/grounding-dino/swint-ogc.onnx")
+                    .with_text_names(&class_names.iter().map(|x| x.as_str()).collect::<Vec<_>>())
+                    .with_class_confs(&[0.25])
+                    .with_text_confs(&[0.25])
+                    .commit()?;
+
+                Box::new(GroundingDINO::new(options)?)
+            }
+        };
+
+        Ok(Backend { model })
     }
 
     // pub async fn run(&mut self) {
@@ -158,36 +201,17 @@ impl Backend {
         &mut self,
         image_data: &Arc<DynamicImage>,
         sender: Sender<Output>,
-    ) -> Result<Vec<Detection>> {
-        // Perform object detection
-        // This is where your ML model or algorithm would run
-
+    ) -> Result<DetectionResults> {
         let mut sender = sender.clone();
-
-        // For progress updates during long operations:
         sender.send(Output::Progress(0.3)).await?;
 
-        // Simulate CPU-intensive processing with a blocking sleep
-        tokio::task::spawn_blocking(|| {
-            log::debug!("Simulating CPU-intensive work for 10 seconds");
-            std::thread::sleep(std::time::Duration::from_secs(10));
-
-            // Any CPU-intensive work would go here
-            // ...
-        })
-        .await?;
-        log::debug!("Work completed!");
-
-        let image = image_data.as_ref().clone();
-
         log::info!("Processing image");
-        let ys = self.model.forward(&[image])?;
+        // Use the trait method instead of direct model call
+        let results = tokio::task::block_in_place(|| self.model.detect(image_data.as_ref()))?;
 
-        // ... more processing ...
         sender.send(Output::Progress(0.7)).await?;
 
-        // Return detected objects
-        Ok(vec![/* detected objects */])
+        Ok(results)
     }
 }
 
@@ -213,7 +237,7 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
         // Create channel
         let (sender, mut receiver) = mpsc::channel(100);
 
-        let mut backend = Backend::new();
+        let mut backend = Backend::default();
 
         // Send the sender back to the application
         output
@@ -228,7 +252,7 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
             match input {
                 Input::ProcessImage(image) => {
                     // Do some async work...
-                    backend
+                    let results = backend
                         .process_image(&image, output.clone())
                         .await
                         .expect("Failed to process image");
@@ -241,12 +265,15 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
                         .expect("Failed to send progress");
 
                     output
-                        .send(Output::DetectionResults(vec![]))
+                        .send(Output::Finished(results))
                         .await
                         .expect("Failed to send detection results");
                 }
-                Input::UpdateParams(params) => {
-                    backend.params = params;
+                // Input::UpdateParams(params) => {
+                //     backend.params = params;
+                // }
+                Input::SetModel(model) => {
+                    backend = Backend::new(model).expect("Failed to create backend");
                 }
                 Input::Stop => {
                     // Stop processing

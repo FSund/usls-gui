@@ -239,7 +239,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
         };
     };
 
-    let models = vec![backend::Models::Mock, backend::Models::GroundingDINO];
+    let models = vec![backend::Model::Mock, backend::Model::GroundingDINO];
     let model_list = pick_list(
         models,
         app.inference_state.selected_model.clone(),
@@ -247,12 +247,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
     )
     .placeholder("Select a model");
 
-    let model_description = if let Some(model_description) = &app.inference_state.model_description
-    {
-        text(format!("{} is ready!", model_description))
-    } else {
-        text("Initializing model...")
-    };
+    let model_status = text(&app.inference_state.model_status);
 
     let menu = row![load_image_button, detect_button]
         .spacing(20)
@@ -264,7 +259,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
         image,
         menu,
         model_list,
-        model_description,
+        model_status,
         Space::new(Length::Fill, Length::Fill),
     ]
     .align_x(iced::alignment::Horizontal::Center);
@@ -275,10 +270,10 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
 #[derive(Debug, Clone)]
 pub struct InferenceState {
     pub selecting_image: bool,
-    pub selected_model: Option<backend::Models>,
-    pub model_description: Option<String>,
+    pub selected_model: Option<backend::Model>,
+    pub model_status: String,
     pub busy: bool,
-    pub detections: Vec<backend::Detection>,
+    // pub detections: Vec<backend::Detection>,
     // pub image: Option<iced::advanced::image::Handle>,
     pub image: Image,
 }
@@ -288,9 +283,9 @@ impl Default for InferenceState {
         Self {
             selecting_image: false,
             selected_model: None,
-            model_description: None,
+            model_status: "".to_string(),
             busy: false,
-            detections: vec![],
+            // detections: vec![],
             image: Image::default(),
         }
     }

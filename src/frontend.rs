@@ -27,7 +27,7 @@ pub enum Message {
     Backend(backend::Output),
     DetectionStarted,
     DetectionFinished,
-    SelectModel(backend::Models),
+    SelectModel(backend::Model),
 
     GoToScreen(Screen),
 }
@@ -76,15 +76,23 @@ impl ZeroShotRust {
         match message {
             Message::Backend(output) => match output {
                 backend::Output::Ready(tx) => {
-                    log::info!("Backend is ready!");
                     self.backend_tx = Some(tx.clone());
-                    self.inference_state.model_description = Some("GroundingDINO".to_string());
+                    if let Some(model) = &self.inference_state.selected_model {
+                        log::info!("Backend is ready!");
+                        self.inference_state.model_status = format!("Model {} is ready!", model);
+                    } else {
+                        self.inference_state.model_status = "Please select a model!".to_string();
+                    };
                     self.screen = Screen::Inference;
                 }
                 backend::Output::Progress(progress) => {
                     if progress >= 1.0 {
                         return Task::done(Message::DetectionFinished);
                     };
+                }
+                backend::Output::Finished(results) => {
+                    log::info!("Detection finished!");
+                    todo!("Handle detection results");
                 }
                 _ => todo!("Handle other backend outputs"),
             },
