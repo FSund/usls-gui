@@ -11,6 +11,7 @@ use futures::{
 use image::DynamicImage;
 use std::{default, future::Future, sync::Arc};
 // use iced::Result;
+use async_trait::async_trait;
 use usls::{models::GroundingDINO, Annotator, DataLoader, Options};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +38,7 @@ pub enum Input {
 
 #[derive(Debug, Clone)]
 pub enum Output {
+    Loading,
     Ready(Sender<Input>),
     Progress(f32),
     Finished(DetectionResults),
@@ -73,7 +75,18 @@ pub struct DetectionParams {
     class_names: Vec<String>,
 }
 
-pub struct Backend {
+#[async_trait]
+trait InferenceBackend {
+    async fn process_image(
+        &mut self,
+        image_data: &Arc<DynamicImage>,
+        sender: Sender<Output>,
+    ) -> Result<DetectionResults>;
+
+    fn update_params(&mut self, _params: DetectionParams) {}
+}
+
+struct Backend {
     // receiver: Receiver<Input>,
     // sender: Sender<Output>,
     // Detection model and other resources
@@ -163,12 +176,16 @@ impl Backend {
     //         }
     //     }
     // }
+}
 
+#[async_trait]
+impl InferenceBackend for Backend {
     async fn process_image(
         &mut self,
         image_data: &Arc<DynamicImage>,
         sender: Sender<Output>,
     ) -> Result<DetectionResults> {
+        // async move {
         // Perform object detection
         // This is where your ML model or algorithm would run
 
@@ -207,6 +224,48 @@ impl Backend {
 
         // Return detected objects
         Ok(results)
+        // }
+    }
+
+    fn update_params(&mut self, params: DetectionParams) {
+        // Update detection parameters
+        self.params = params;
+        log::info!("Updated detection parameters: {:?}", self.params);
+    }
+}
+
+pub struct MockBackend {
+    // Mock backend for testing
+}
+impl MockBackend {
+    pub fn new() -> Self {
+        MockBackend {}
+    }
+}
+
+#[async_trait]
+impl InferenceBackend for MockBackend {
+    async fn process_image(
+        &mut self,
+        image_data: &Arc<DynamicImage>,
+        sender: Sender<Output>,
+    ) -> Result<DetectionResults> {
+        // async move {
+        let mut sender = sender.clone();
+
+        // Simulate some processing
+        sender.send(Output::Progress(0.3)).await?;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        sender.send(Output::Progress(0.7)).await?;
+
+        // Return mock results
+        let results = DetectionResults {
+            y: usls::Y::default(),
+            annotated: image_data.as_ref().clone(),
+        };
+
+        Ok(results)
+        // }
     }
 }
 
@@ -216,7 +275,7 @@ impl Backend {
 /// This is a more ergonomic [`stream::unfold`], which allows you to go
 /// from the "world of futures" to the "world of streams" by simply looping
 /// and publishing to an async channel from inside a [`Future`].
-pub fn channel<T, F>(size: usize, f: impl FnOnce(Sender<T>) -> F) -> impl stream::Stream<Item = T>
+fn channel<T, F>(size: usize, f: impl FnOnce(Sender<T>) -> F) -> impl stream::Stream<Item = T>
 where
     F: Future<Output = ()>,
 {
@@ -227,12 +286,29 @@ where
     stream::select(receiver, runner)
 }
 
-pub fn connect() -> impl futures::stream::Stream<Item = Output> {
+async fn create_backend(model: &Models) -> Box<dyn InferenceBackend + Send> {
+    match model {
+        Models::Mock => Box::new(MockBackend::new()),
+        Models::GroundingDINO => {
+            let backend = tokio::task::spawn_blocking(|| Backend::new())
+                .await
+                .unwrap();
+            Box::new(backend)
+        }
+    }
+}
+
+pub fn connect(model: Models) -> impl futures::stream::Stream<Item = Output> {
     channel(100, |mut output| async move {
         // Create channel
         let (sender, mut receiver) = mpsc::channel(100);
 
-        let mut backend = Backend::new();
+        output
+            .send(Output::Loading)
+            .await
+            .expect("Failed to send loading");
+
+        let mut backend = create_backend(&model).await;
 
         // Send the sender back to the application
         output
@@ -265,7 +341,7 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
                         .expect("Failed to send detection results");
                 }
                 Input::UpdateParams(params) => {
-                    backend.params = params;
+                    backend.update_params(params);
                 }
                 Input::Stop => {
                     // Stop processing

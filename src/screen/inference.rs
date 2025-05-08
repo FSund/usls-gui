@@ -247,11 +247,10 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
     )
     .placeholder("Select a model");
 
-    let model_description = if let Some(model_description) = &app.inference_state.model_description
-    {
-        text(format!("{} is ready!", model_description))
+    let model_info = if let Some(model_info) = &app.inference_state.model_info {
+        text(model_info.to_string())
     } else {
-        text("Initializing model...")
+        text("Please select a model")
     };
 
     let menu = row![load_image_button, detect_button]
@@ -264,7 +263,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
         image,
         menu,
         model_list,
-        model_description,
+        model_info,
         Space::new(Length::Fill, Length::Fill),
     ]
     .align_x(iced::alignment::Horizontal::Center);
@@ -276,7 +275,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
 pub struct InferenceState {
     pub selecting_image: bool,
     pub selected_model: Option<backend::Models>,
-    pub model_description: Option<String>,
+    pub model_info: Option<String>,
     pub busy: bool,
     // pub detections: Vec<backend::Detection>,
     // pub image: Option<iced::advanced::image::Handle>,
@@ -288,7 +287,7 @@ impl Default for InferenceState {
         Self {
             selecting_image: false,
             selected_model: None,
-            model_description: None,
+            model_info: None,
             busy: false,
             // detections: vec![],
             image: Image::default(),

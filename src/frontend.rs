@@ -75,10 +75,14 @@ impl ZeroShotRust {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Backend(output) => match output {
+                backend::Output::Loading => {
+                    log::info!("Backend is loading...");
+                    self.inference_state.model_info = Some("Loading model...".to_string());
+                }
                 backend::Output::Ready(tx) => {
                     log::info!("Backend is ready!");
                     self.backend_tx = Some(tx.clone());
-                    self.inference_state.model_description = Some("GroundingDINO".to_string());
+                    self.inference_state.model_info = Some("Model is ready".to_string());
                     self.screen = Screen::Inference;
                 }
                 backend::Output::Progress(progress) => {
@@ -151,8 +155,9 @@ impl ZeroShotRust {
             Message::DetectionFinished => {
                 self.inference_state.busy = false;
             }
-            Message::SelectModel(_model) => {
-                todo!("Implement model selection");
+            Message::SelectModel(model) => {
+                self.inference_state.selected_model = Some(model.clone());
+                log::info!("Selected model: {:?}", model);
             }
         }
         Task::none()
@@ -165,9 +170,19 @@ impl ZeroShotRust {
         }
     }
 
+    // fn backend_subscription(model: Option<backend::Models>) -> iced::Subscription<backend::Output> {
+    //     Subscription::run_with_id("backend", backend::connect(model))
+    // }
+
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        // Always run backend
-        let backend = Subscription::run(backend::connect).map(Message::Backend);
+        let backend = match &self.inference_state.selected_model {
+            Some(model) => {
+                // Use the selected model
+                Subscription::run_with_id(model.to_string(), backend::connect(model.clone()))
+                    .map(Message::Backend)
+            }
+            None => Subscription::none(),
+        };
 
         Subscription::batch([backend])
     }
