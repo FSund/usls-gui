@@ -239,7 +239,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
         };
     };
 
-    let models = vec![backend::Models::Mock, backend::Models::GroundingDINO];
+    let models = vec![backend::ModelType::Mock, backend::ModelType::GroundingDINO];
     let model_list = pick_list(
         models,
         app.inference_state.selected_model.clone(),
@@ -274,7 +274,7 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
 #[derive(Debug, Clone)]
 pub struct InferenceState {
     pub selecting_image: bool,
-    pub selected_model: Option<backend::Models>,
+    pub selected_model: Option<backend::ModelType>,
     pub model_info: Option<String>,
     pub busy: bool,
     // pub detections: Vec<backend::Detection>,

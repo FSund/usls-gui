@@ -27,7 +27,7 @@ pub enum Message {
     Backend(backend::Output),
     DetectionStarted,
     DetectionFinished,
-    SelectModel(backend::Models),
+    SelectModel(backend::ModelType),
 
     GoToScreen(Screen),
 }
