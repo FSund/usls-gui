@@ -159,9 +159,11 @@ impl Backend {
     async fn process_image(
         &mut self,
         image_data: &Arc<DynamicImage>,
-        sender: &mut Sender<Output>,
+        sender: &Sender<Output>,
     ) -> Result<DetectionResults> {
         log::info!("Processing image");
+
+        let mut sender = sender.clone();
         sender.send(Output::Progress(0.3)).await?;
         let results = tokio::task::block_in_place(|| self.model.detect(image_data.as_ref()))?;
         sender.send(Output::Progress(0.7)).await?;
@@ -266,7 +268,7 @@ pub fn connect(model: ModelType) -> impl futures::stream::Stream<Item = Output> 
                 Input::ProcessImage(image) => {
                     // Do some async work...
                     let results = backend
-                        .process_image(&image, output.clone())
+                        .process_image(&image, &output)
                         .await
                         .expect("Failed to process image");
 
