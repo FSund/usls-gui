@@ -1,4 +1,3 @@
-// use tokio::sync::mpsc::{Receiver, Sender};
 use anyhow::Result;
 use futures::{
     channel::mpsc,
@@ -6,10 +5,7 @@ use futures::{
     stream, SinkExt, StreamExt,
 };
 use image::DynamicImage;
-use std::{default, future::Future, sync::Arc};
-// use iced::Result;
-use async_trait::async_trait;
-// use usls::{models::GroundingDINO, Annotator, DataLoader, Options};
+use std::{future::Future, sync::Arc};
 
 use crate::model::{mock, onnx, DetectionModel, DetectionResults};
 
@@ -31,6 +27,7 @@ impl std::fmt::Display for ModelType {
 #[derive(Debug, Clone)]
 pub enum Input {
     ProcessImage(Arc<DynamicImage>),
+    SelectModel(ModelType),
     UpdateParams(DetectionParams),
     Stop,
 }
@@ -39,32 +36,11 @@ pub enum Input {
 pub enum Output {
     Loading,
     Ready(Sender<Input>),
+    ModelLoaded(ModelType),
     Progress(f32),
     Finished(DetectionResults),
     Error(String),
 }
-
-// #[derive(Debug, Clone)]
-// pub struct DetectionResults {
-//     // detections: Vec<Detection>,
-//     y: usls::Y,
-//     annotated: DynamicImage,
-// }
-
-// #[derive(Debug, Clone)]
-// pub struct Detection {
-//     class: String,
-//     confidence: f32,
-//     bounding_box: BoundingBox,
-// }
-
-// #[derive(Debug, Clone)]
-// pub struct BoundingBox {
-//     x: f32,
-//     y: f32,
-//     width: f32,
-//     height: f32,
-// }
 
 #[derive(Debug, Clone)]
 pub struct DetectionParams {
@@ -89,72 +65,31 @@ struct Backend {
     // sender: Sender<Output>,
     // Detection model and other resources
     // params: DetectionParams,
-    model: Box<dyn DetectionModel>,
+    model: Option<Box<dyn DetectionModel>>,
 }
 
 impl Default for Backend {
     fn default() -> Self {
-        Backend::new(ModelType::Mock)
+        Backend::new(None)
     }
 }
 
 impl Backend {
-    pub fn new(model_type: ModelType) -> Self {
+    pub fn new(model_type: Option<ModelType>) -> Self {
         let params = DetectionParams::default();
-        let model: Box<dyn DetectionModel> = match model_type {
-            ModelType::Mock => Box::new(mock::MockModel::new(&params)),
-            ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
+        let model = match model_type {
+            Some(model_type) => {
+                let model: Box<dyn DetectionModel> = match model_type {
+                    ModelType::Mock => Box::new(mock::MockModel::new(&params)),
+                    ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
+                };
+                Some(model)
+            }
+            None => None,
         };
 
         Backend { model }
     }
-
-    // async fn detect(
-    //     &mut self,
-    //     image_data: &Arc<DynamicImage>,
-    //     sender: Sender<Output>,
-    // ) -> Result<DetectionResults> {
-    //     // async move {
-    //     // Perform object detection
-    //     // This is where your ML model or algorithm would run
-
-    //     let mut sender = sender.clone();
-
-    //     // For progress updates during long operations:
-    //     sender.send(Output::Progress(0.3)).await?;
-
-    //     // // Simulate CPU-intensive processing with a blocking sleep
-    //     // tokio::task::spawn_blocking(|| {
-    //     //     log::debug!("Simulating CPU-intensive work for 10 seconds");
-    //     //     std::thread::sleep(std::time::Duration::from_secs(10));
-
-    //     //     // Any CPU-intensive work would go here
-    //     //     // ...
-    //     // })
-    //     // .await?;
-    //     // log::debug!("Work completed!");
-
-    //     let xs = vec![image_data.as_ref().clone()];
-
-    //     sender.send(Output::Progress(0.7)).await?;
-
-    //     log::info!("Processing image");
-    //     let ys = tokio::task::block_in_place(|| self.model.forward(&xs))?;
-
-    //     let annotator = Annotator::default()
-    //         .with_bboxes_thickness(4)
-    //         .with_saveout(self.model.spec());
-    //     let annotated = annotator.plot(&xs, &ys, false)?;
-
-    //     let results = DetectionResults {
-    //         y: ys[0].clone(),
-    //         annotated: annotated.first().expect("No annotated image found").clone(),
-    //     };
-
-    //     // Return detected objects
-    //     Ok(results)
-    //     // }
-    // }
 
     async fn process_image(
         &mut self,
@@ -163,12 +98,16 @@ impl Backend {
     ) -> Result<DetectionResults> {
         log::info!("Processing image");
 
-        let mut sender = sender.clone();
-        sender.send(Output::Progress(0.3)).await?;
-        let results = tokio::task::block_in_place(|| self.model.detect(image_data.as_ref()))?;
-        sender.send(Output::Progress(0.7)).await?;
-
-        Ok(results)
+        if let Some(model) = &mut self.model {
+            // Use the model to process the image
+            let mut sender = sender.clone();
+            sender.send(Output::Progress(0.3)).await?;
+            let results = tokio::task::block_in_place(|| model.detect(image_data.as_ref()))?;
+            sender.send(Output::Progress(0.7)).await?;
+            Ok(results)
+        } else {
+            return Err(anyhow::anyhow!("Model not initialized"));
+        }
     }
 
     fn update_params(&mut self, params: DetectionParams) {
@@ -177,41 +116,6 @@ impl Backend {
         log::info!("Updated detection parameters: {:?}", params);
     }
 }
-
-// pub struct MockBackend {
-//     // Mock backend for testing
-// }
-// impl MockBackend {
-//     pub fn new() -> Self {
-//         MockBackend {}
-//     }
-// }
-
-// #[async_trait]
-// impl InferenceBackend for MockBackend {
-//     async fn process_image(
-//         &mut self,
-//         image_data: &Arc<DynamicImage>,
-//         sender: Sender<Output>,
-//     ) -> Result<DetectionResults> {
-//         // async move {
-//         let mut sender = sender.clone();
-
-//         // Simulate some processing
-//         sender.send(Output::Progress(0.3)).await?;
-//         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-//         sender.send(Output::Progress(0.7)).await?;
-
-//         // Return mock results
-//         let results = DetectionResults {
-//             y: usls::Y::default(),
-//             annotated: image_data.as_ref().clone(),
-//         };
-
-//         Ok(results)
-//         // }
-//     }
-// }
 
 /// Creates a new [`Stream`] that produces the items sent from a [`Future`]
 /// to the [`mpsc::Sender`] provided to the closure.
@@ -230,19 +134,7 @@ where
     stream::select(receiver, runner)
 }
 
-// async fn create_backend(model: &ModelType) -> Box<dyn InferenceBackend + Send> {
-//     match model {
-//         ModelType::Mock => Box::new(MockBackend::new()),
-//         ModelType::GroundingDINO => {
-//             let backend = tokio::task::spawn_blocking(|| Backend::new())
-//                 .await
-//                 .unwrap();
-//             Box::new(backend)
-//         }
-//     }
-// }
-
-pub fn connect(model: ModelType) -> impl futures::stream::Stream<Item = Output> {
+pub fn connect() -> impl futures::stream::Stream<Item = Output> {
     channel(100, |mut output| async move {
         // Create channel
         let (sender, mut receiver) = mpsc::channel(100);
@@ -252,7 +144,7 @@ pub fn connect(model: ModelType) -> impl futures::stream::Stream<Item = Output> 
             .await
             .expect("Failed to send loading");
 
-        let mut backend = Backend::new(model);
+        let mut backend = Backend::new(Some(ModelType::Mock));
 
         // Send the sender back to the application
         output
@@ -283,6 +175,10 @@ pub fn connect(model: ModelType) -> impl futures::stream::Stream<Item = Output> 
                         .send(Output::Finished(results))
                         .await
                         .expect("Failed to send detection results");
+                }
+                Input::SelectModel(model_type) => {
+                    backend = Backend::new(Some(model_type.clone()));
+                    output.send(Output::ModelLoaded(model_type)).await.expect("Failed to send model loaded");
                 }
                 Input::UpdateParams(params) => {
                     backend.update_params(params);

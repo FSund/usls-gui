@@ -72,6 +72,21 @@ impl ZeroShotRust {
         "ZeroShotRust".to_string()
     }
 
+    fn send_to_backend(&self, message: backend::Input) -> Task<Message> {
+        if let Some(tx) = self.backend_tx.clone() {
+            let mut tx = tx.clone();
+            return Task::perform(
+                async move {
+                    if let Err(e) = tx.send(message).await {
+                        eprintln!("Failed to send message to backend: {:?}", e);
+                    }
+                },
+                |_| Message::DetectionStarted,
+            );
+        }
+        Task::none()
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Backend(output) => match output {
@@ -82,8 +97,12 @@ impl ZeroShotRust {
                 backend::Output::Ready(tx) => {
                     log::info!("Backend is ready!");
                     self.backend_tx = Some(tx.clone());
-                    self.inference_state.model_info = Some("Model is ready".to_string());
+                    self.inference_state.model_info = None;
                     self.screen = Screen::Inference;
+                }
+                backend::Output::ModelLoaded(model) => {
+                    log::info!("Model loaded: {:?}", model);
+                    self.inference_state.model_info = Some(format!("Model loaded: {:?}", model));
                 }
                 backend::Output::Progress(progress) => {
                     if progress >= 1.0 {
@@ -98,20 +117,7 @@ impl ZeroShotRust {
             },
             Message::Detect(image) => {
                 log::debug!("Button pressed!");
-
-                // Send message to backend
-                if let Some(tx) = self.backend_tx.clone() {
-                    let msg = Input::ProcessImage(image);
-                    let mut tx = tx.clone();
-                    return Task::perform(
-                        async move {
-                            if let Err(e) = tx.send(msg).await {
-                                eprintln!("Failed to send message to backend: {:?}", e);
-                            }
-                        },
-                        |_| Message::DetectionStarted,
-                    );
-                }
+                return self.send_to_backend(Input::ProcessImage(image));
             }
             Message::LoadImage => {
                 log::debug!("Load Image button pressed!");
@@ -157,7 +163,9 @@ impl ZeroShotRust {
             }
             Message::SelectModel(model) => {
                 self.inference_state.selected_model = Some(model.clone());
+                self.inference_state.model_info = Some(format!("Loading model {:?}...", model));
                 log::info!("Selected model: {:?}", model);
+                return self.send_to_backend(Input::SelectModel(model));
             }
         }
         Task::none()
@@ -175,14 +183,7 @@ impl ZeroShotRust {
     // }
 
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        let backend = match &self.inference_state.selected_model {
-            Some(model) => {
-                // Use the selected model
-                Subscription::run_with_id(model.to_string(), backend::connect(model.clone()))
-                    .map(Message::Backend)
-            }
-            None => Subscription::none(),
-        };
+        let backend = Subscription::run(backend::connect).map(Message::Backend);
 
         Subscription::batch([backend])
     }

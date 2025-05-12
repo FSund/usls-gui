@@ -1,22 +1,11 @@
-use crate::{backend::DetectionParams, model::DetectionModel};
+use super::{DetectionModel, DetectionResults, Detections};
+use crate::backend::DetectionParams;
 
 use anyhow::Result;
-use futures::{
-    channel::mpsc,
-    channel::mpsc::{Receiver, Sender},
-    stream, SinkExt, StreamExt,
-};
 use image::DynamicImage;
-use std::{default, future::Future, sync::Arc};
-// use iced::Result;
-use async_trait::async_trait;
-use usls::{Annotator, DataLoader, Options};
-
-use super::{DetectionResults, Detections};
 
 #[derive(Default)]
 pub struct MockModel {}
-
 
 impl DetectionModel for MockModel {
     fn new(_parameters: &DetectionParams) -> Self {

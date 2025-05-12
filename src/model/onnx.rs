@@ -1,20 +1,9 @@
-use std::sync::Arc;
-
 use anyhow::Result;
-// use futures::{
-//     channel::mpsc,
-//     channel::mpsc::{Receiver, Sender},
-//     stream, SinkExt, StreamExt,
-// };
 use image::DynamicImage;
-// use std::{default, future::Future, sync::Arc};
-// use iced::Result;
-// use async_trait::async_trait;
 use usls::{Annotator, DataLoader, GroundingDINO, Options};
 
-use crate::backend::DetectionParams;
-
 use super::{BoundingBox, DetectionModel, DetectionResults, Detections};
+use crate::backend::DetectionParams;
 
 pub struct ONNXModel {
     // receiver: Receiver<Input>,
