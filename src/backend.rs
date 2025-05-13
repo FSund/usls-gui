@@ -106,7 +106,7 @@ impl Backend {
             sender.send(Output::Progress(0.7)).await?;
             Ok(results)
         } else {
-            return Err(anyhow::anyhow!("Model not initialized"));
+            Err(anyhow::anyhow!("Model not initialized"))
         }
     }
 
@@ -144,7 +144,7 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
             .await
             .expect("Failed to send loading");
 
-        let mut backend = Backend::new(Some(ModelType::Mock));
+        let mut backend = Backend::new(None);
 
         // Send the sender back to the application
         output
@@ -178,7 +178,10 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
                 }
                 Input::SelectModel(model_type) => {
                     backend = Backend::new(Some(model_type.clone()));
-                    output.send(Output::ModelLoaded(model_type)).await.expect("Failed to send model loaded");
+                    output
+                        .send(Output::ModelLoaded(model_type))
+                        .await
+                        .expect("Failed to send model loaded");
                 }
                 Input::UpdateParams(params) => {
                     backend.update_params(params);
