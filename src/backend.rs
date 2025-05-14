@@ -5,7 +5,10 @@ use futures::{
     stream, SinkExt, StreamExt,
 };
 use image::DynamicImage;
-use std::{future::Future, sync::Arc};
+use std::{
+    future::Future,
+    sync::{Arc, Mutex},
+};
 
 use crate::model::{mock, onnx, DetectionModel, DetectionResults};
 
@@ -64,31 +67,87 @@ struct Backend {
     // receiver: Receiver<Input>,
     // sender: Sender<Output>,
     // Detection model and other resources
-    // params: DetectionParams,
-    model: Option<Box<dyn DetectionModel>>,
+    params: DetectionParams,
+    model: Arc<Mutex<Option<Box<dyn DetectionModel>>>>,
+    model_init_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Default for Backend {
     fn default() -> Self {
-        Backend::new(None)
+        Backend::new()
     }
 }
 
 impl Backend {
-    pub fn new(model_type: Option<ModelType>) -> Self {
+    pub fn new() -> Self {
         let params = DetectionParams::default();
-        let model = match model_type {
-            Some(model_type) => {
-                let model: Box<dyn DetectionModel> = match model_type {
+        // let model = match model_type {
+        //     Some(model_type) => {
+        //         let model: Box<dyn DetectionModel> = match model_type {
+        //             ModelType::Mock => Box::new(mock::MockModel::new(&params)),
+        //             ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
+        //         };
+        //         Some(model)
+        //     }
+        //     None => None,
+        // };
+
+        Backend {
+            model: Arc::new(Mutex::new(None)),
+            params,
+            model_init_handle: None,
+        }
+    }
+
+    // async fn init_model(&mut self, model_type: ModelType) {
+    //     // Initialize the model in a separate thread
+    //     let params = DetectionParams::default();
+    //     let model: Box<dyn DetectionModel> = match model_type {
+    //         ModelType::Mock => Box::new(mock::MockModel::new(&params)),
+    //         ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
+    //     };
+    //     self.model = Some(model);
+    // }
+
+    async fn load_model(&mut self, model_type: ModelType) {
+        // Cancel any previous model initialization
+        if let Some(handle) = self.model_init_handle.take() {
+            handle.abort();
+            log::info!("Aborted previous model initialization");
+        }
+
+        // Start new initialization in a separate task
+        let model_type = model_type.clone();
+        let params = self.params.clone();
+        let model_clone = self.model.clone();
+        self.model_init_handle = Some(tokio::spawn(async move {
+            log::info!("Starting initialization of {}", &model_type);
+            // Call the external library function (blocking)
+            // We'll use tokio::task::spawn_blocking for CPU-bound operations
+            let model_type_clone = model_type.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let model: Box<dyn DetectionModel> = match &model_type_clone {
                     ModelType::Mock => Box::new(mock::MockModel::new(&params)),
                     ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
                 };
-                Some(model)
-            }
-            None => None,
-        };
+                model
+            })
+            .await;
 
-        Backend { model }
+            // Check if initialization completed successfully
+            match result {
+                Ok(new_model) => {
+                    log::info!("Model {model_type} initialized successfully");
+                    let mut model_handle = model_clone.lock().unwrap();
+                    *model_handle = Some(new_model);
+                }
+                Err(e) => {
+                    log::error!("Failed to initialize model {model_type} ({e})");
+                    let mut model_handle = model_clone.lock().unwrap();
+                    *model_handle = None;
+                }
+            }
+        }));
     }
 
     async fn process_image(
@@ -98,16 +157,26 @@ impl Backend {
     ) -> Result<DetectionResults> {
         log::info!("Processing image");
 
-        if let Some(model) = &mut self.model {
-            // Use the model to process the image
-            let mut sender = sender.clone();
-            sender.send(Output::Progress(0.3)).await?;
-            let results = tokio::task::block_in_place(|| model.detect(image_data.as_ref()))?;
-            sender.send(Output::Progress(0.7)).await?;
-            Ok(results)
-        } else {
-            Err(anyhow::anyhow!("Model not initialized"))
-        }
+        let mut sender = sender.clone();
+        sender.send(Output::Progress(0.3)).await?;
+
+        // Use a block to limit the scope of the model lock
+        let results = {
+            // Get a lock on the Arc<Mutex<>> and check if the model exists
+            let mut model_guard = self.model.lock().unwrap();
+
+            if let Some(model) = &mut *model_guard {
+                // Use block_in_place to run the blocking operation
+                // on the current thread to avoid blocking the async runtime
+                let results = tokio::task::block_in_place(|| model.detect(image_data.as_ref()))?;
+                Ok(results)
+            } else {
+                Err(anyhow::anyhow!("Model not initialized"))
+            }
+        };
+
+        sender.send(Output::Progress(0.7)).await?;
+        results
     }
 
     fn update_params(&mut self, params: DetectionParams) {
@@ -144,7 +213,7 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
             .await
             .expect("Failed to send loading");
 
-        let mut backend = Backend::new(None);
+        let mut backend = Backend::new();
 
         // Send the sender back to the application
         output
@@ -177,7 +246,7 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
                         .expect("Failed to send detection results");
                 }
                 Input::SelectModel(model_type) => {
-                    backend = Backend::new(Some(model_type.clone()));
+                    backend.load_model(model_type.clone()).await;
                     output
                         .send(Output::ModelLoaded(model_type))
                         .await
