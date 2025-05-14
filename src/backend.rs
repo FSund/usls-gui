@@ -125,6 +125,10 @@ impl Backend {
             // Call the external library function (blocking)
             // We'll use tokio::task::spawn_blocking for CPU-bound operations
             let model_type_clone = model_type.clone();
+
+            // Tokio docs:
+            // "This function is intended for non-async operations that eventually finish on their own. If you want to spawn an ordinary thread, you should use thread::spawn instead."
+            // "Be aware that tasks spawned using spawn_blocking cannot be aborted because they are not async. If you call abort on a spawn_blocking task, then this will not have any effect, and the task will continue running normally. "
             let result = tokio::task::spawn_blocking(move || {
                 let model: Box<dyn DetectionModel> = match &model_type_clone {
                     ModelType::Mock => Box::new(mock::MockModel::new(&params)),
