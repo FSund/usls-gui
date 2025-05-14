@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::{
     channel::mpsc,
     channel::mpsc::{Receiver, Sender},
@@ -10,13 +10,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+pub use crate::model::ModelType;
 use crate::model::{mock, onnx, DetectionModel, DetectionResults};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ModelType {
-    Mock,
-    GroundingDINO,
-}
 
 impl std::fmt::Display for ModelType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -68,8 +63,8 @@ struct Backend {
     // sender: Sender<Output>,
     // Detection model and other resources
     params: DetectionParams,
-    model: Arc<Mutex<Option<Box<dyn DetectionModel>>>>,
-    model_init_handle: Option<tokio::task::JoinHandle<()>>,
+    model: Option<Box<dyn DetectionModel>>,
+    selected_model: Option<ModelType>,
 }
 
 impl Default for Backend {
@@ -93,9 +88,9 @@ impl Backend {
         // };
 
         Backend {
-            model: Arc::new(Mutex::new(None)),
+            model: None,
+            selected_model: None,
             params,
-            model_init_handle: None,
         }
     }
 
@@ -109,49 +104,29 @@ impl Backend {
     //     self.model = Some(model);
     // }
 
-    async fn load_model(&mut self, model_type: ModelType) {
-        // Cancel any previous model initialization
-        if let Some(handle) = self.model_init_handle.take() {
-            handle.abort();
-            log::info!("Aborted previous model initialization");
-        }
+    async fn select_model(&mut self, model_type: ModelType) -> Result<()> {
+        // Check if the model is already loaded
 
         // Start new initialization in a separate task
         let model_type = model_type.clone();
         let params = self.params.clone();
-        let model_clone = self.model.clone();
-        self.model_init_handle = Some(tokio::spawn(async move {
-            log::info!("Starting initialization of {}", &model_type);
-            // Call the external library function (blocking)
-            // We'll use tokio::task::spawn_blocking for CPU-bound operations
-            let model_type_clone = model_type.clone();
 
-            // Tokio docs:
-            // "This function is intended for non-async operations that eventually finish on their own. If you want to spawn an ordinary thread, you should use thread::spawn instead."
-            // "Be aware that tasks spawned using spawn_blocking cannot be aborted because they are not async. If you call abort on a spawn_blocking task, then this will not have any effect, and the task will continue running normally. "
-            let result = tokio::task::spawn_blocking(move || {
-                let model: Box<dyn DetectionModel> = match &model_type_clone {
-                    ModelType::Mock => Box::new(mock::MockModel::new(&params)),
-                    ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
-                };
-                model
-            })
-            .await;
+        log::info!("Starting initialization of {}", &model_type);
+        // Call the external library function (blocking)
+        // We'll use tokio::task::spawn_blocking for CPU-bound operations
+        let model_type_clone = model_type.clone();
 
-            // Check if initialization completed successfully
-            match result {
-                Ok(new_model) => {
-                    log::info!("Model {model_type} initialized successfully");
-                    let mut model_handle = model_clone.lock().unwrap();
-                    *model_handle = Some(new_model);
-                }
-                Err(e) => {
-                    log::error!("Failed to initialize model {model_type} ({e})");
-                    let mut model_handle = model_clone.lock().unwrap();
-                    *model_handle = None;
-                }
-            }
-        }));
+        let model = tokio::task::spawn_blocking(move || {
+            let model: Box<dyn DetectionModel> = match &model_type_clone {
+                ModelType::Mock => Box::new(mock::MockModel::new(&params)),
+                ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
+            };
+            model
+        })
+        .await
+        .context("Failed to load model. Blocking task panicked.")?;
+        self.model = Some(model);
+        Ok(())
     }
 
     async fn process_image(
@@ -166,10 +141,7 @@ impl Backend {
 
         // Use a block to limit the scope of the model lock
         let results = {
-            // Get a lock on the Arc<Mutex<>> and check if the model exists
-            let mut model_guard = self.model.lock().unwrap();
-
-            if let Some(model) = &mut *model_guard {
+            if let Some(model) = &mut self.model {
                 // Use block_in_place to run the blocking operation
                 // on the current thread to avoid blocking the async runtime
                 let results = tokio::task::block_in_place(|| model.detect(image_data.as_ref()))?;
@@ -250,7 +222,10 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
                         .expect("Failed to send detection results");
                 }
                 Input::SelectModel(model_type) => {
-                    backend.load_model(model_type.clone()).await;
+                    backend
+                        .select_model(model_type.clone())
+                        .await
+                        .expect("Failed to select model");
                     output
                         .send(Output::ModelLoaded(model_type))
                         .await

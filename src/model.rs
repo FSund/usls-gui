@@ -15,6 +15,12 @@ use usls::{Annotator, DataLoader, Options};
 
 use crate::backend::DetectionParams;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelType {
+    Mock,
+    GroundingDINO,
+}
+
 #[derive(Debug, Clone)]
 pub struct BoundingBox {
     class: String,
@@ -44,4 +50,5 @@ pub trait DetectionModel: Send {
         Self: Sized;
     // fn update_params(&mut self, params: &DetectionParams) -> Result<()>;
     // fn clone_box(&self) -> Box<dyn DetectionModel>;
+    // fn model_type(&self) -> ModelType;
 }

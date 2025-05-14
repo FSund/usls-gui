@@ -1,4 +1,4 @@
-use super::{DetectionModel, DetectionResults, Detections};
+use super::{DetectionModel, DetectionResults, Detections, ModelType};
 use crate::backend::DetectionParams;
 
 use anyhow::Result;
