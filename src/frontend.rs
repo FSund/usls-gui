@@ -72,19 +72,15 @@ impl ZeroShotRust {
         "ZeroShotRust".to_string()
     }
 
-    fn send_to_backend(&self, message: backend::Input) -> Task<Message> {
+    fn send_to_backend(&self, message: backend::Input) {
         if let Some(tx) = self.backend_tx.clone() {
             let mut tx = tx.clone();
-            return Task::perform(
-                async move {
-                    if let Err(e) = tx.send(message).await {
-                        eprintln!("Failed to send message to backend: {:?}", e);
-                    }
-                },
-                |_| Message::DetectionStarted,
-            );
+            tokio::spawn(async move {
+                if let Err(e) = tx.send(message).await {
+                    eprintln!("Failed to send message to backend: {:?}", e);
+                }
+            });
         }
-        Task::none()
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -92,17 +88,13 @@ impl ZeroShotRust {
             Message::Backend(output) => match output {
                 backend::Output::Loading => {
                     log::info!("Backend is loading...");
-                    self.inference_state.model_info = Some("Loading model...".to_string());
+                    // self.inference_state.model_info = Some("Loading model...".to_string());
                 }
                 backend::Output::Ready(tx) => {
                     log::info!("Backend is ready!");
                     self.backend_tx = Some(tx.clone());
-                    self.inference_state.model_info = None;
+                    // self.inference_state.model_info = None;
                     self.screen = Screen::Inference;
-                }
-                backend::Output::ModelLoaded(model) => {
-                    log::info!("Model loaded: {:?}", model);
-                    self.inference_state.model_info = Some(format!("Model loaded: {:?}", model));
                 }
                 backend::Output::Progress(progress) => {
                     if progress >= 1.0 {
@@ -117,7 +109,8 @@ impl ZeroShotRust {
             },
             Message::Detect(image) => {
                 log::debug!("Button pressed!");
-                return self.send_to_backend(Input::ProcessImage(image));
+                self.send_to_backend(Input::ProcessImage(image));
+                return Task::done(Message::DetectionStarted);
             }
             Message::LoadImage => {
                 log::debug!("Load Image button pressed!");
@@ -163,9 +156,8 @@ impl ZeroShotRust {
             }
             Message::SelectModel(model) => {
                 self.inference_state.selected_model = Some(model.clone());
-                self.inference_state.model_info = Some(format!("Loading model {:?}...", model));
                 log::info!("Selected model: {:?}", model);
-                return self.send_to_backend(Input::SelectModel(model));
+                self.send_to_backend(Input::SelectModel(model));
             }
         }
         Task::none()

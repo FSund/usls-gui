@@ -6,9 +6,6 @@ use super::{BoundingBox, DetectionModel, DetectionResults, Detections, ModelType
 use crate::backend::DetectionParams;
 
 pub struct ONNXModel {
-    // receiver: Receiver<Input>,
-    // sender: Sender<Output>,
-    // Detection model and other resources
     params: DetectionParams,
     model: Option<usls::models::GroundingDINO>,
 }
@@ -21,8 +18,7 @@ impl Default for ONNXModel {
 
 impl ONNXModel {
     fn get_model(&mut self) -> &mut usls::models::GroundingDINO {
-        // Defer model loading until first use (lazy loading)
-        if self.model.is_none() {
+        self.model.get_or_insert_with(|| {
             let class_names = self.params.class_names.clone();
             let options = Options::grounding_dino()
                 .with_model_file(concat!(
@@ -38,9 +34,9 @@ impl ONNXModel {
             log::info!("Creating model with options: {:?}", options);
             let model = GroundingDINO::new(options).expect("Failed to create model");
             log::info!("Model initialized");
-            self.model = Some(model);
-        }
-        self.model.as_mut().expect("Model not loaded")
+
+            model
+        })
     }
 }
 

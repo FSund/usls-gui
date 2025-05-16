@@ -5,10 +5,7 @@ use futures::{
     stream, SinkExt, StreamExt,
 };
 use image::DynamicImage;
-use std::{
-    future::Future,
-    sync::{Arc, Mutex},
-};
+use std::{future::Future, sync::Arc};
 
 pub use crate::model::ModelType;
 use crate::model::{mock, onnx, DetectionModel, DetectionResults};
@@ -34,7 +31,6 @@ pub enum Input {
 pub enum Output {
     Loading,
     Ready(Sender<Input>),
-    ModelLoaded(ModelType),
     Progress(f32),
     Finished(DetectionResults),
     Error(String),
@@ -43,8 +39,6 @@ pub enum Output {
 #[derive(Debug, Clone)]
 pub struct DetectionParams {
     pub confidence_threshold: f32,
-    // overlap_threshold: f32,
-    // Other parameters
     pub class_names: Vec<String>,
 }
 
@@ -52,16 +46,12 @@ impl Default for DetectionParams {
     fn default() -> Self {
         DetectionParams {
             confidence_threshold: 0.25,
-            // overlap_threshold: 0.5,
             class_names: vec!["person".to_string(), "car".to_string(), "bus".to_string()],
         }
     }
 }
 
 struct Backend {
-    // receiver: Receiver<Input>,
-    // sender: Sender<Output>,
-    // Detection model and other resources
     params: DetectionParams,
     model: Option<Box<dyn DetectionModel>>,
     selected_model: Option<ModelType>,
@@ -76,17 +66,6 @@ impl Default for Backend {
 impl Backend {
     pub fn new() -> Self {
         let params = DetectionParams::default();
-        // let model = match model_type {
-        //     Some(model_type) => {
-        //         let model: Box<dyn DetectionModel> = match model_type {
-        //             ModelType::Mock => Box::new(mock::MockModel::new(&params)),
-        //             ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
-        //         };
-        //         Some(model)
-        //     }
-        //     None => None,
-        // };
-
         Backend {
             model: None,
             selected_model: None,
@@ -94,30 +73,19 @@ impl Backend {
         }
     }
 
-    // async fn init_model(&mut self, model_type: ModelType) {
-    //     // Initialize the model in a separate thread
-    //     let params = DetectionParams::default();
-    //     let model: Box<dyn DetectionModel> = match model_type {
-    //         ModelType::Mock => Box::new(mock::MockModel::new(&params)),
-    //         ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
-    //     };
-    //     self.model = Some(model);
-    // }
-
     async fn select_model(&mut self, model_type: ModelType) -> Result<()> {
         // Check if the model is already loaded
+        if self.selected_model == Some(model_type.clone()) {
+            log::info!("Model {model_type} is already loaded, skipping initialization.");
+            return Ok(());
+        }
 
-        // Start new initialization in a separate task
-        let model_type = model_type.clone();
+        // Use tokio::task::spawn_blocking for CPU-bound operations
+        // to avoid blocking the async runtime
+        // (probably not necessary after we implemented deferred model loading)
         let params = self.params.clone();
-
-        log::info!("Starting initialization of {}", &model_type);
-        // Call the external library function (blocking)
-        // We'll use tokio::task::spawn_blocking for CPU-bound operations
-        let model_type_clone = model_type.clone();
-
         let model = tokio::task::spawn_blocking(move || {
-            let model: Box<dyn DetectionModel> = match &model_type_clone {
+            let model: Box<dyn DetectionModel> = match &model_type {
                 ModelType::Mock => Box::new(mock::MockModel::new(&params)),
                 ModelType::GroundingDINO => Box::new(onnx::ONNXModel::new(&params)),
             };
@@ -139,16 +107,14 @@ impl Backend {
         let mut sender = sender.clone();
         sender.send(Output::Progress(0.3)).await?;
 
-        // Use a block to limit the scope of the model lock
-        let results = {
-            if let Some(model) = &mut self.model {
-                // Use block_in_place to run the blocking operation
-                // on the current thread to avoid blocking the async runtime
-                let results = tokio::task::block_in_place(|| model.detect(image_data.as_ref()))?;
-                Ok(results)
-            } else {
-                Err(anyhow::anyhow!("Model not initialized"))
-            }
+        // Perform detection
+        let results = if let Some(model) = &mut self.model {
+            // Use block_in_place to run the blocking operation
+            // on the current thread to avoid blocking the async runtime
+            let results = tokio::task::block_in_place(|| model.detect(image_data.as_ref()))?;
+            Ok(results)
+        } else {
+            Err(anyhow::anyhow!("Model not initialized"))
         };
 
         sender.send(Output::Progress(0.7)).await?;
@@ -226,10 +192,6 @@ pub fn connect() -> impl futures::stream::Stream<Item = Output> {
                         .select_model(model_type.clone())
                         .await
                         .expect("Failed to select model");
-                    output
-                        .send(Output::ModelLoaded(model_type))
-                        .await
-                        .expect("Failed to send model loaded");
                 }
                 Input::UpdateParams(params) => {
                     backend.update_params(params);
