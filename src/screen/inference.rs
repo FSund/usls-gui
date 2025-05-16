@@ -234,25 +234,28 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
 
     let mut detect_button = button("Run detection");
     if let Some(image) = &app.image {
-        if app.backend_tx.is_some() && !app.inference_state.busy {
+        if app.backend_tx.is_some()
+            && app.inference_state.selected_model.is_some()
+            && !app.inference_state.busy
+        {
             detect_button = detect_button.on_press(Message::Detect(image.clone()));
         };
     };
 
-    let models = vec![backend::Models::Mock, backend::Models::GroundingDINO];
+    log::debug!(
+        "backend_tx: {}, selected_model: {}, busy: {}",
+        app.backend_tx.is_some(),
+        app.inference_state.selected_model.is_some(),
+        app.inference_state.busy
+    );
+
+    let models = vec![backend::ModelType::Mock, backend::ModelType::GroundingDINO];
     let model_list = pick_list(
         models,
         app.inference_state.selected_model.clone(),
         Message::SelectModel,
     )
     .placeholder("Select a model");
-
-    let model_description = if let Some(model_description) = &app.inference_state.model_description
-    {
-        text(format!("{} is ready!", model_description))
-    } else {
-        text("Initializing model...")
-    };
 
     let menu = row![load_image_button, detect_button]
         .spacing(20)
@@ -264,7 +267,6 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
         image,
         menu,
         model_list,
-        model_description,
         Space::new(Length::Fill, Length::Fill),
     ]
     .align_x(iced::alignment::Horizontal::Center);
@@ -275,10 +277,9 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
 #[derive(Debug, Clone)]
 pub struct InferenceState {
     pub selecting_image: bool,
-    pub selected_model: Option<backend::Models>,
-    pub model_description: Option<String>,
+    pub selected_model: Option<backend::ModelType>,
     pub busy: bool,
-    pub detections: Vec<backend::Detection>,
+    // pub detections: Vec<backend::Detection>,
     // pub image: Option<iced::advanced::image::Handle>,
     pub image: Image,
 }
@@ -288,9 +289,8 @@ impl Default for InferenceState {
         Self {
             selecting_image: false,
             selected_model: None,
-            model_description: None,
             busy: false,
-            detections: vec![],
+            // detections: vec![],
             image: Image::default(),
         }
     }

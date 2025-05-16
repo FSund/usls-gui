@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0.97"
 argh = "0.1.13"
 async-stream = "0.3.6"
+async-trait = "0.1.88"
 futures = "0.3.31"
 iced = { version = "0.13.1", features = ["tokio", "image", "advanced", "canvas"] }
 image = "0.25.6"
@@ -23,3 +24,8 @@ ort = { version = "2.0.0-rc.9", default-features = false, features = ["cuda", "n
 
 [[example]]
 name = "grounding-dino"
+
+# fix GCC 15 compilation issues with onig sub-dependency
+[patch.crates-io]
+onig = { git = "https://github.com/rust-onig/rust-onig", rev = "c4378abcbf30d58cf5f230c0d2e6375f2be05a47" }
+onig_sys = { git = "https://github.com/rust-onig/rust-onig", rev = "c4378abcbf30d58cf5f230c0d2e6375f2be05a47" }

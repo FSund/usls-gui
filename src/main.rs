@@ -2,6 +2,7 @@ mod backend;
 mod frontend;
 mod io;
 mod logging;
+mod model;
 mod screen;
 
 // use backend::{Backend, Input, Output};
