@@ -32,8 +32,8 @@ use tokio::time::error::Elapsed;
 // use tracing::instrument::WithSubscriber;
 
 // pub const DEFAULT_IMAGE: &[u8] = include_bytes!("../../assets/bus.jpg");
-// pub const DEFAULT_IMAGE: &[u8] =
-//     include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/bus.jpg"));
+pub const DEFAULT_IMAGE: &[u8] =
+    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/bus.jpg"));
 
 fn square<'a>(
     width: impl Into<Length> + Copy,
@@ -125,8 +125,9 @@ impl Image {
 
 impl Default for Image {
     fn default() -> Self {
+        let image = iced::widget::image::Handle::from_bytes(DEFAULT_IMAGE.to_vec());
         Self {
-            image: None,
+            image: Some(image),
             width: 640,
             height: 480,
         }
@@ -144,13 +145,26 @@ impl canvas::Program<Message> for Image {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        // log::debug!("Bounds {bounds:?}");
+        // log::debug!("Image size: {}x{}", self.width, self.height);
 
         let palette = theme.extended_palette();
 
+        let mut image_frame = canvas::Frame::new(renderer, bounds.size());
+        if let Some(image) = &self.image {
+            let size = iced::Size {
+                width: self.width as f32,
+                height: self.height as f32,
+            };
+            let bounds = Rectangle::with_size(size);
+            image_frame.draw_image(bounds, image);
+        }
+
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+
         // debugging //
         // let rect = Rectangle::with_size((480, 640).into());
-        let rect = Path::rectangle((0.0, 0.0).into(), (480.0, 640.0).into());
+        let rect = Path::rectangle((0.0, 0.0).into(), (200.0, 250.0).into());
         // let color = iced::Color::from_rgb8(255, 0, 0);
         // let style = iced::widget::canvas::Style::Solid(color);
         // let fill = iced::widget::canvas::Fill::default();
@@ -179,24 +193,19 @@ impl canvas::Program<Message> for Image {
         frame.fill_rectangle(
             (r.x, r.y).into(),
             r.size(),
-            iced::Color::from_rgba(0.5, 0.5, 0.5, 0.5),
+            iced::Color::from_rgba(0.5, 0.5, 1.0, 0.5),
         );
 
         // let im = iced::widget::image::Handle::from_bytes(DEFAULT_IMAGE.to_vec());
         // frame.draw_image(Rectangle::with_radius(480.0), &im);
 
-        if let Some(image) = &self.image {
-            // let bounds = Rectangle::with_radius(200.0);
-            let size: iced::Size<f32> = (self.width as f32, self.height as f32).into();
-            let bounds = Rectangle::with_size(size);
-            frame.draw_image(bounds, image);
-        }
-
-        vec![frame.into_geometry()]
+        vec![frame.into_geometry(), image_frame.into_geometry()]
     }
 }
 
 pub fn view(app: &ZeroShotRust) -> Element<Message> {
+    // TODO: app.image and app.inference_state.image should always be the same image (Arc<DynamicImage>)
+    // so no reason to use an if/else here
     let image: Element<Message> = if let Some(image) = &app.image {
         // Convert DynamicImage to iced image
         let rgba = image.to_rgba8();
@@ -205,7 +214,10 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
             rgba.height(),
             rgba.as_raw().to_vec(),
         );
-        iced::widget::image(im).opacity(0.5).into()
+        iced::widget::image(im)
+            .opacity(0.5)
+            .content_fit(iced::ContentFit::ScaleDown)
+            .into()
     } else {
         // let im = iced::widget::image::Handle::from_bytes(DEFAULT_IMAGE.to_vec());
         // iced::widget::image(im)
@@ -216,10 +228,10 @@ pub fn view(app: &ZeroShotRust) -> Element<Message> {
             .height(480)
             .into()
     };
-    let image = container(image)
+    let image = container(image.explain(iced::Color::from_rgb(1.0, 0.0, 0.0)))
         .padding(10)
-        .width(640)
-        .height(480)
+        // .width(640)
+        // .height(480)
         // .max_width(480)
         // .max_height(640)
         // .width(Length::Fixed(640.0))

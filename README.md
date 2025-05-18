@@ -5,4 +5,4 @@ A WIP frontend for running computer vision models in pure Rust via [usls](https:
 ## TODO
 
 - [ ] Draw detections
-- [ ] Load model on demand (now always loads GroundingDINO on startup)
+- [x] Load model on demand (now always loads GroundingDINO on startup)
